@@ -137,7 +137,7 @@ def training(
                 tv_vol_sVoxel,
                 pipe,
             )["vol"]
-            loss_tv = tv_3d_loss(vol_pred, reduction="mean")
+            loss_tv = tv_3d_loss(vol_pred, reduction="mean")  # 计算TV损失 用于保证空间连续性同时保留锐利边缘
             loss["tv"] = loss_tv
             loss["total"] = loss["total"] + opt.lambda_tv * loss_tv
 

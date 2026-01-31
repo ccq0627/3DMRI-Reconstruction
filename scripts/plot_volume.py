@@ -4,9 +4,9 @@ import numpy as np
 import pyvista as pv
 
 # Path to *.npy volume file
-volume_path = "output/synthetic_dataset/cone_ntrain_50_angle_360/0_chest_cone/point_cloud/iteration_30000/vol_gt.npy"
+volume_path = "data/real_dataset/cone_ntrain_50_angle_360/seashell/output/point_cloud/iteration_30000/vol_pred.npy"
 # Image save path
-save_path = "volume.png"
+save_path = "volume_pred_z.png"
 
 # Pyvista settings. You may need to tune them.
 cpos = [
@@ -18,8 +18,9 @@ window_size = [800, 1000]
 colormap = "viridis"
 
 volume = np.load(volume_path)
-half_size = volume.shape[0] // 2
-volume[:half_size, :, :] = 0  # Set half to zero to show the inner structure
+half_size = volume.shape[2] // 2
+volume[:, :, half_size+1:] = 0  # Set half to zero to show the inner structure
+volume[:, :, :half_size] = 0
 clim = [0.0, 1.0]
 
 plotter = pv.Plotter(window_size=window_size, line_smoothing=True, off_screen=True)
