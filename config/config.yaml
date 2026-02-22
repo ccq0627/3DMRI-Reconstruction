@@ -1,0 +1,2 @@
+source_path: data/real_dataset/cone_ntrain_50_angle_360/seashell
+model_path: data/real_dataset/cone_ntrain_50_angle_360/seashell/debug_output
