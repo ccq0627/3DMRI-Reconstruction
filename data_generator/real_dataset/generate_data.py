@@ -49,7 +49,7 @@ def main(args):
     angles = np.concatenate(
         [np.arange(angle_start, angle_last, angle_interval), [angle_last]]
     )
-    angles = angles / 180.0 * np.pi
+    angles = angles / 180.0 * np.pi  # 转换为弧度
 
     # Read and save projections
     output_path = args.output

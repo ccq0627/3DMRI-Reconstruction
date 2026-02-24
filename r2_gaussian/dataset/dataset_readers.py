@@ -126,8 +126,8 @@ def readCTameras(meta_data, source_path, eval=False, scene_scale=1.0):
             T = w2c[:3, 3]
 
             image_path = osp.join(source_path, frame_info["file_path"])
-            image = np.load(image_path) * scene_scale
-            # Note, dDetector is [v, u] not [u, v]
+            image = np.load(image_path) * scene_scale   # 对衰减系数进行缩放(与物体实际尺寸相关)
+            # Note, dDetector is [v, u] not [u, v] (height,width)
             FovX = np.arctan2(cam_cfg["sDetector"][1] / 2, cam_cfg["DSD"]) * 2
             FovY = np.arctan2(cam_cfg["sDetector"][0] / 2, cam_cfg["DSD"]) * 2
 

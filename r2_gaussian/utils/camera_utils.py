@@ -11,13 +11,15 @@
 import sys
 import torch
 import numpy as np
+from r2_gaussian.arguments import ModelParams
+from r2_gaussian.dataset.dataset_readers import CameraInfo
 
 sys.path.append("./")
 from r2_gaussian.dataset.cameras import Camera
 
 
 def loadCam(args, id, cam_info):
-    gt_image = torch.from_numpy(cam_info.image)[None]
+    gt_image = torch.from_numpy(cam_info.image).unsqueeze(0)  # gt_iamge.shape = [1,H,W]
 
     return Camera(
         colmap_id=cam_info.uid,
@@ -35,7 +37,7 @@ def loadCam(args, id, cam_info):
     )
 
 
-def cameraList_from_camInfos(cam_infos, args):
+def cameraList_from_camInfos(cam_infos:CameraInfo, args: ModelParams):
     camera_list = []
 
     for id, c in enumerate(cam_infos):
