@@ -17,7 +17,16 @@ from r2_gaussian.utils.image_utils import metric_vol
 def recon_volume(projs, angles, geo, recon_method):
     """Reconstruct ct with traditional methods."""
     if recon_method == "fdk":
+        # 2026-3-5 15.36 测试不修改projs
         vol = algs.fdk(projs[:, ::-1, :], geo, angles)
+        # vol = algs.fdk(projs, geo, angles) # add
+        if False:
+            import pyvista as pv
+
+            plotter = pv.Plotter(window_size=(800,800),line_smoothing=True,off_screen=False)
+            plotter.add_volume(vol)
+            plotter.show_axes()
+            plotter.show()
     elif recon_method == "cgls":
         vol, _ = algs.cgls(projs[:, ::-1, :], geo, angles, 60, computel2=True)
     else:

@@ -78,6 +78,7 @@ def init_pcd(
             np.random.choice(len(valid_indices), n_points, replace=False)
         ]
         sampled_positions = sampled_indices * dVoxel - sVoxel / 2 + offOrigin
+        # 取索引处的vol值  vol[array[1,2,3],array[1,2,3],array[1,2,3]] = [vol[1,1,1], vol[2,2,2], vol[3,3,3]]
         sampled_densities = vol[
             sampled_indices[:, 0],
             sampled_indices[:, 1],

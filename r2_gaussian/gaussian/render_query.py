@@ -136,7 +136,7 @@ def render(
     rotations = None
     cov3D_precomp = None
     if pipe.compute_cov3D_python:
-        cov3D_precomp = pc.get_covariance(scaling_modifier)
+        cov3D_precomp = pc.get_covariance(scaling_modifier)  # shape: [N, 6]
     else:
         scales = pc.get_scaling
         rotations = pc.get_rotation

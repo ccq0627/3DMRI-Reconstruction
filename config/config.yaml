@@ -1,2 +1,2 @@
-source_path: data/real_dataset/cone_ntrain_50_angle_360/seashell
-model_path: data/real_dataset/cone_ntrain_50_angle_360/seashell/debug_output
+source_path: data/naf_dataset/head_50.pickle
+model_path: data/naf_dataset/output_2026_3_4

@@ -50,7 +50,9 @@ def training(
     scanner_cfg = scene.scanner_cfg
     bbox = scene.bbox
     volume_to_world = max(scanner_cfg["sVoxel"])
+    # opt.max_scale = None (dafult)
     max_scale = opt.max_scale * volume_to_world if opt.max_scale else None
+    # opt.densify_scale_threshold = 0.1 (percent of volume size)
     densify_scale_threshold = (
         opt.densify_scale_threshold * volume_to_world
         if opt.densify_scale_threshold
@@ -81,8 +83,9 @@ def training(
     use_tv = opt.lambda_tv > 0
     if use_tv:
         print("Use total variation loss")
+        # tv_vol_size = 32
         tv_vol_size = opt.tv_vol_size
-        tv_vol_nVoxel = torch.tensor([tv_vol_size, tv_vol_size, tv_vol_size])  # (32*32*32)
+        tv_vol_nVoxel = torch.tensor([tv_vol_size, tv_vol_size, tv_vol_size])  # shape = [32*32*32]
         tv_vol_sVoxel = torch.tensor(scanner_cfg["dVoxel"]) * tv_vol_nVoxel
 
     # Train
@@ -189,7 +192,7 @@ def training(
                 tqdm.write(f"[ITER {iteration}] Saving Checkpoint")
                 torch.save(
                     (gaussians.capture(), iteration),
-                    ckpt_save_path + "/chkpnt" + str(iteration) + ".pth",
+                    ckpt_save_path + "/chkpnt_" + str(iteration) + ".pth",
                 )
 
             # Progress bar
@@ -398,6 +401,7 @@ if __name__ == "__main__":
             args_dict[key] = cfg[key]
 
     # Set up logging writer
+    # Set up output folder and return SummaryWriter
     tb_writer = prepare_output_and_logger(args)
 
     print("Optimizing " + args.model_path)
