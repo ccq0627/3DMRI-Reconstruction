@@ -170,4 +170,10 @@ if __name__ == "__main__":
     # fmt: on
 
     args = parser.parse_args()
+    # setup random initialize
+    if True:
+        args_dict = vars(args)
+        args_dict["recon_method"] = "random"
+        args_dict["output"] = "data/naf_dataset/init_head_50_random.npy"
+
     main(args, init_parser.extract(args), lp.extract(args), pp.extract(args))

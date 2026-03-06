@@ -36,6 +36,11 @@ def initialize_gaussian(gaussians: GaussianModel, args: ModelParams, loaded_iter
                     osp.dirname(args.source_path),
                     "init_" + osp.basename(args.source_path).split(".")[0] + ".npy",
                 )
+            # add MRI format
+            elif "nii" in args.source_path.split("."):
+                ply_path = osp.join(
+                    osp.dirname(args.source_path), "Init_pointcloud.npy"
+                )
             else:
                 raise ValueError("Could not recognize scene type!")
         else:
@@ -55,6 +60,12 @@ def initialize_gaussian(gaussians: GaussianModel, args: ModelParams, loaded_iter
             point_cloud = fetchPly(ply_path)
             xyz = np.asarray(point_cloud.points)
             density = np.asarray(point_cloud.colors[:, :1])
+
+        if False:
+            ply_path = 'data/naf_dataset/init_head_50_random.npy'
+            point_cloud = np.load(ply_path)
+            xyz = point_cloud[:, :3]
+            density = point_cloud[:, 3:4]
 
         gaussians.create_from_pcd(xyz, density, 1.0)
 

@@ -2,22 +2,10 @@ import torch
 import numpy as np
 import os.path as osp
 import matplotlib.pyplot as plt
+from r2_gaussian.utils.loss_utils import l1_loss, ssim, tv_3d_loss
 
-root_dir = "data/real_dataset/cone_ntrain_50_angle_360" 
-path = osp.join(root_dir, "seashell/proj_train/0001.npy")
-data = np.load(path)
-max = np.max(data)
-min = np.min(data)
-data1 = (data - min) / (max - min)
-plt.figure(figsize=(6,6))
-plt.imshow(data,cmap="gray")
-plt.axis('off')
-plt.show()
+a = torch.arange(8).reshape(2,2,2)
+b = torch.full(size=(2,2,2),fill_value=2)
+print(a,b)
+print(ssim(a,b))
 
-plt.figure(figsize=(6,6))
-plt.imshow(data1,cmap="gray")
-plt.axis('off')
-plt.show()
-
-print(data.shape)
-print(osp.basename(path))

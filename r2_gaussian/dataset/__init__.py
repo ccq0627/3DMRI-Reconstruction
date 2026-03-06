@@ -29,12 +29,13 @@ class Scene:
     def __init__(
         self,
         args: ModelParams,
-        shuffle=True,
+        # shuffle=True,
     ):
         self.model_path = args.model_path
-
-        self.train_cameras = {}
-        self.test_cameras = {}
+        
+        # don't need camera
+        # self.train_cameras = {}
+        # self.test_cameras = {}
 
         # Read scene info
         if osp.exists(osp.join(args.source_path, "meta_data.json")):
@@ -49,18 +50,22 @@ class Scene:
                 args.source_path,
                 args.eval,
             )
+        elif "nii" in args.source_path.split("."):
+            scene_info = sceneLoadTypeCallbacks["MRI"](
+                args.source_path,
+            )
         else:
             assert False, f"Could not recognize scene type: {args.source_path}."
 
-        if shuffle:
-            random.shuffle(scene_info.train_cameras)
-            random.shuffle(scene_info.test_cameras)
+        # if shuffle:
+        #     random.shuffle(scene_info.train_cameras)
+        #     random.shuffle(scene_info.test_cameras)
 
-        # Load cameras
-        print("Loading Training Cameras")
-        self.train_cameras = cameraList_from_camInfos(scene_info.train_cameras, args)
-        print("Loading Test Cameras")
-        self.test_cameras = cameraList_from_camInfos(scene_info.test_cameras, args)
+        # # Load cameras
+        # print("Loading Training Cameras")
+        # self.train_cameras = cameraList_from_camInfos(scene_info.train_cameras, args)
+        # print("Loading Test Cameras")
+        # self.test_cameras = cameraList_from_camInfos(scene_info.test_cameras, args)
 
         # Set up some parameters
         self.vol_gt = scene_info.vol
