@@ -102,38 +102,11 @@ def training(
 
         # Update learning rate
         gaussians.update_learning_rate(iteration)
-        # don't need camera
-        # # Get one camera for training
-        # if not viewpoint_stack:
-        #     viewpoint_stack = scene.getTrainCameras().copy()
-        #     viewpoint_indices = list(range(len(viewpoint_stack)))
-        # rand_idx = randint(0, len(viewpoint_indices) - 1)
-        # viewpoint_cam = viewpoint_stack.pop(rand_idx)
-        # vind = viewpoint_indices.pop(rand_idx)
-
-        # # Render X-ray projection
-        # render_pkg = render(viewpoint_cam, gaussians, pipe)
-        # image, viewspace_point_tensor, visibility_filter, radii = (
-        #     render_pkg["render"],
-        #     render_pkg["viewspace_points"],
-        #     render_pkg["visibility_filter"],
-        #     render_pkg["radii"],
-        # )
 
         # query volume
         pred_vol = queryfunc(gaussians)["vol"]
 
         # # Compute loss
-        # gt_image = viewpoint_cam.original_image.cuda()
-        # loss = {"total": 0.0}
-        # render_loss = l1_loss(image, gt_image)
-        # loss["render"] = render_loss
-        # loss["total"] += loss["render"]
-        # if opt.lambda_dssim > 0:
-        #     loss_dssim = 1.0 - ssim(image, gt_image)
-        #     loss["dssim"] = loss_dssim
-        #     loss["total"] = loss["total"] + opt.lambda_dssim * loss_dssim
-
         # 直接使用体积compute loss
         gt_vol = scene.vol_gt  # device = cuda
         loss = {"total": 0.0}
@@ -168,25 +141,27 @@ def training(
 
         with torch.no_grad():
             """wait to writting"""
-            # # Adaptive control
-            # gaussians.max_radii2D[visibility_filter] = torch.max(
-            #     gaussians.max_radii2D[visibility_filter], radii[visibility_filter]
-            # )
-            # gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
-            # if iteration < opt.densify_until_iter:
-            #     if (
-            #         iteration > opt.densify_from_iter
-            #         and iteration % opt.densification_interval == 0
-            #     ):
-            #         gaussians.densify_and_prune(
-            #             opt.densify_grad_threshold,
-            #             opt.density_min_threshold,
-            #             opt.max_screen_size,
-            #             max_scale,
-            #             opt.max_num_gaussians,
-            #             densify_scale_threshold,
-            #             bbox,
-            #         )
+            # Adaptive control
+            gaussians.max_radii2D[visibility_filter] = torch.max(
+                gaussians.max_radii2D[visibility_filter], radii[visibility_filter]
+            )
+            gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
+            if iteration < opt.densify_until_iter:
+                if (
+                    iteration > opt.densify_from_iter
+                    and iteration % opt.densification_interval == 0
+                ):
+                    gaussians.densify_and_prune(
+                        opt.densify_grad_threshold,
+                        opt.density_min_threshold,
+                        opt.max_screen_size,
+                        max_scale,
+                        opt.max_num_gaussians,
+                        densify_scale_threshold,
+                        bbox,
+                    )
+
+            
             if gaussians.get_density.shape[0] == 0:
                 raise ValueError(
                     "No Gaussian left. Change adaptive control hyperparameters!"
