@@ -21,7 +21,7 @@ conda activate r2_gaussian
 
 ```sh
 └── MRIdata
-    └── XXX.nii.g
+    └── XXX.nii.gz
 ```
 
 ## 3. Running
