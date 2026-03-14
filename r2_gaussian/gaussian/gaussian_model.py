@@ -42,6 +42,7 @@ class GaussianModel:
             return symm
 
         if self.scale_bound is not None:
+            # [0.001, 1.0]
             scale_min_bound, scale_max_bound = self.scale_bound
             assert (
                 scale_min_bound < scale_max_bound
@@ -69,6 +70,7 @@ class GaussianModel:
         self._rotation = torch.empty(0)  # rotation expressed in quaternions
         self._density = torch.empty(0)  # density
         self.max_radii2D = torch.empty(0)
+        self.max_radii3D = torch.empty(0)
         self.xyz_gradient_accum = torch.empty(0)
         self.denom = torch.empty(0)
         self.optimizer = None
@@ -83,6 +85,7 @@ class GaussianModel:
             self._rotation,
             self._density,
             self.max_radii2D,
+            self.max_radii3D,
             self.xyz_gradient_accum,
             self.denom,
             self.optimizer.state_dict(),
@@ -97,6 +100,7 @@ class GaussianModel:
             self._rotation,
             self._density,
             self.max_radii2D,
+            self.max_radii3D,
             xyz_gradient_accum,
             denom,
             opt_dict,
@@ -162,6 +166,7 @@ class GaussianModel:
         self._rotation = nn.Parameter(rots.requires_grad_(True))
         self._density = nn.Parameter(fused_density.requires_grad_(True))
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
+        self.max_radii3D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
         #! Generate one gaussian for debugging purpose
         if False:
@@ -355,6 +360,7 @@ class GaussianModel:
         return optimizable_tensors
 
     def prune_points(self, mask):
+        # valid_points_mask = True的位置保留 即mask为false的保留，为True删除
         valid_points_mask = ~mask
         optimizable_tensors = self._prune_optimizer(valid_points_mask)
 
@@ -367,6 +373,7 @@ class GaussianModel:
 
         self.denom = self.denom[valid_points_mask]
         self.max_radii2D = self.max_radii2D[valid_points_mask]
+        self.max_radii3D = self.max_radii3D[valid_points_mask]
 
     def cat_tensors_to_optimizer(self, tensors_dict):
         optimizable_tensors = {}
@@ -409,6 +416,7 @@ class GaussianModel:
         new_scaling,
         new_rotation,
         new_max_radii2D,
+        new_max_radii3D,
     ):
         d = {
             "xyz": new_xyz,
@@ -426,6 +434,7 @@ class GaussianModel:
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.max_radii2D = torch.cat([self.max_radii2D, new_max_radii2D], dim=-1)
+        self.max_radii3D = torch.cat([self.max_radii3D, new_max_radii3D], dim=-1)
 
     def densify_and_split(self, grads, grad_threshold, densify_scale_threshold, N=2):
         n_init_points = self.get_xyz.shape[0]
@@ -454,6 +463,7 @@ class GaussianModel:
             self.get_density[selected_pts_mask].repeat(N, 1) * (1 / N)
         )
         new_max_radii2D = self.max_radii2D[selected_pts_mask].repeat(N)
+        new_max_radii3D = self.max_radii3D[selected_pts_mask].repeat(N)
 
         self.densification_postfix(
             new_xyz,
@@ -461,6 +471,7 @@ class GaussianModel:
             new_scaling,
             new_rotation,
             new_max_radii2D,
+            new_max_radii3D,
         )
 
         prune_filter = torch.cat(
@@ -489,6 +500,7 @@ class GaussianModel:
         new_scaling = self._scaling[selected_pts_mask]
         new_rotation = self._rotation[selected_pts_mask]
         new_max_radii2D = self.max_radii2D[selected_pts_mask]
+        new_max_radii3D = self.max_radii3D[selected_pts_mask]
 
         self._density[selected_pts_mask] = new_densities
 
@@ -498,13 +510,13 @@ class GaussianModel:
             new_scaling,
             new_rotation,
             new_max_radii2D,
+            new_max_radii3D,
         )
 
     def densify_and_prune(
         self,
         max_grad,
         min_density,
-        max_screen_size,
         max_scale,
         max_num_gaussians,
         densify_scale_threshold,
@@ -522,6 +534,7 @@ class GaussianModel:
                 self.densify_and_split(grads, max_grad, densify_scale_threshold)
 
         # Prune gaussians with too small density
+        # 密度太小的高斯不参与贡献
         prune_mask = (self.get_density < min_density).squeeze()
         # Prune gaussians outside the bbox
         if bbox is not None:
@@ -537,20 +550,24 @@ class GaussianModel:
 
             prune_mask = prune_mask | prune_mask_xyz
 
-        if max_screen_size:
-            big_points_vs = self.max_radii2D > max_screen_size
-            prune_mask = torch.logical_or(prune_mask, big_points_vs)
         if max_scale:
             big_points_ws = self.get_scaling.max(dim=1).values > max_scale
             prune_mask = torch.logical_or(prune_mask, big_points_ws)
+        
         self.prune_points(prune_mask)
 
         torch.cuda.empty_cache()
 
         return grads
 
-    def add_densification_stats(self, viewspace_point_tensor, update_filter):
-        self.xyz_gradient_accum[update_filter] += torch.norm(
-            viewspace_point_tensor.grad[update_filter, :2], dim=-1, keepdim=True
+    # def add_densification_stats(self, viewspace_point_tensor, update_filter):
+    #     self.xyz_gradient_accum[update_filter] += torch.norm(
+    #         viewspace_point_tensor.grad[update_filter, :2], dim=-1, keepdim=True
+    #     )
+    #     self.denom[update_filter] += 1
+
+    def add_densification_stats(self):
+        self.xyz_gradient_accum = torch.norm(
+            self._xyz.grad, dim=-1, keepdim=True
         )
-        self.denom[update_filter] += 1
+        self.denom += 1

@@ -1,2 +1,2 @@
-source_path: MRIdata/00000.nii.gz
-model_path: MRIdata/output_2026_3_6
+source_path: MRIdata
+model_path: MRIdata/output_2026_3_14_2

@@ -29,7 +29,6 @@ class Scene:
     def __init__(
         self,
         args: ModelParams,
-        # shuffle=True,
     ):
         self.model_path = args.model_path
         
@@ -50,7 +49,7 @@ class Scene:
                 args.source_path,
                 args.eval,
             )
-        elif "nii" in args.source_path.split("."):
+        elif osp.exists(osp.join(args.source_path, "nii_data.json")):
             scene_info = sceneLoadTypeCallbacks["MRI"](
                 args.source_path,
             )
@@ -68,15 +67,15 @@ class Scene:
         # self.test_cameras = cameraList_from_camInfos(scene_info.test_cameras, args)
 
         # Set up some parameters
-        self.vol_gt = scene_info.vol
-        self.scanner_cfg = scene_info.scanner_cfg
+        self.vol_gt = scene_info.vol  # device:GPU
+        self.nii_cfg = scene_info.nii_cfg
         self.scene_scale = scene_info.scene_scale
         self.bbox = torch.stack(
             [
-                torch.tensor(self.scanner_cfg["offOrigin"])
-                - torch.tensor(self.scanner_cfg["sVoxel"]) / 2,
-                torch.tensor(self.scanner_cfg["offOrigin"])
-                + torch.tensor(self.scanner_cfg["sVoxel"]) / 2,
+                torch.tensor(self.nii_cfg["offOrigin"])
+                - torch.tensor(self.nii_cfg["sVoxel"]) / 2,
+                torch.tensor(self.nii_cfg["offOrigin"])
+                + torch.tensor(self.nii_cfg["sVoxel"]) / 2,
             ],
             dim=0,
         )

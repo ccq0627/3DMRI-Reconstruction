@@ -46,11 +46,13 @@ def training(
     # Set up dataset
     scene = Scene(dataset)
 
+    gt_vol = scene.vol_gt  # device = cuda
     # Set up some parameters
-    scanner_cfg = scene.scanner_cfg
+    nii_cfg = scene.nii_cfg
     bbox = scene.bbox
-    volume_to_world = max(scanner_cfg["sVoxel"])
-    # opt.max_scale = None (dafult)
+    volume_to_world = max(nii_cfg["sVoxel"])
+    # opt.max_scale = 0.15 (dafult)
+    # max_scale = 0.3
     max_scale = opt.max_scale * volume_to_world if opt.max_scale else None
     # opt.densify_scale_threshold = 0.1 (percent of volume size)
     densify_scale_threshold = (
@@ -60,12 +62,13 @@ def training(
     )
     scale_bound = None
     if dataset.scale_min > 0 and dataset.scale_max > 0:
-        scale_bound = np.array([dataset.scale_min, dataset.scale_max]) * volume_to_world
+        # default scale_min=0.0005, scale_max=0.5
+        scale_bound = np.array([dataset.scale_min, dataset.scale_max]) * volume_to_world  # [0.001, 1.0]
     queryfunc = lambda x: query(
         x,
-        scanner_cfg["offOrigin"],
-        scanner_cfg["nVoxel"],
-        scanner_cfg["sVoxel"],
+        nii_cfg["offOrigin"],
+        nii_cfg["nVoxel"],
+        nii_cfg["sVoxel"],
         pipe,
     )
 
@@ -79,6 +82,14 @@ def training(
         gaussians.restore(model_params, opt)
         print(f"Load checkpoint {osp.basename(checkpoint)}.")
 
+    # Set up different stages' size of nVoxel
+    # stages = {
+    #     "1": torch.tensor([32, 43, 43]),
+    #     "2": torch.tensor([65, 87, 87]),
+    #     "3": torch.tensor([130, 175, 175]),
+    #     "4": torch.tensor([261, 350, 350]),
+    # }
+
     # Set up loss
     use_tv = opt.lambda_tv > 0
     if use_tv:
@@ -86,7 +97,7 @@ def training(
         # tv_vol_size = 32
         tv_vol_size = opt.tv_vol_size
         tv_vol_nVoxel = torch.tensor([tv_vol_size, tv_vol_size, tv_vol_size])  # shape = [32*32*32]
-        tv_vol_sVoxel = torch.tensor(scanner_cfg["dVoxel"]) * tv_vol_nVoxel
+        tv_vol_sVoxel = torch.tensor(nii_cfg["dVoxel"]) * tv_vol_nVoxel
 
     # Train
     iter_start = torch.cuda.Event(enable_timing=True)
@@ -105,10 +116,8 @@ def training(
 
         # query volume
         pred_vol = queryfunc(gaussians)["vol"]
-
         # # Compute loss
         # 直接使用体积compute loss
-        gt_vol = scene.vol_gt  # device = cuda
         loss = {"total": 0.0}
         render_loss = l1_loss(pred_vol, gt_vol)
         loss["render"] = render_loss
@@ -142,10 +151,7 @@ def training(
         with torch.no_grad():
             """wait to writting"""
             # Adaptive control
-            gaussians.max_radii2D[visibility_filter] = torch.max(
-                gaussians.max_radii2D[visibility_filter], radii[visibility_filter]
-            )
-            gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
+            gaussians.add_densification_stats()
             if iteration < opt.densify_until_iter:
                 if (
                     iteration > opt.densify_from_iter
@@ -154,13 +160,11 @@ def training(
                     gaussians.densify_and_prune(
                         opt.densify_grad_threshold,
                         opt.density_min_threshold,
-                        opt.max_screen_size,
                         max_scale,
                         opt.max_num_gaussians,
-                        densify_scale_threshold,
+                        densify_scale_threshold, # 0.2
                         bbox,
                     )
-
             
             if gaussians.get_density.shape[0] == 0:
                 raise ValueError(
@@ -190,7 +194,7 @@ def training(
                 progress_bar.set_postfix(
                     {
                         "loss": f"{loss['total'].item():.1e}",
-                        "pts": f"{gaussians.get_density.shape[0]:2.1e}",
+                        "pts": f"{gaussians.get_density.shape[0]}",
                     }
                 )
                 progress_bar.update(5)
@@ -303,7 +307,7 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default=None)
-    parser.add_argument("--config", type=str, default="config/config_MRI.yaml")  # debug config file
+    parser.add_argument("--config", type=str, default='config/config_MRI.yaml', help="Path of config")  # debug config file
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     args.test_iterations.append(args.iterations)

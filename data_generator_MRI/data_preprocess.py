@@ -3,29 +3,44 @@ import nibabel as nib
 import os.path as osp
 from argparse import ArgumentParser
 import sys
-
-sys.path.append("./")
-from r2_gaussian.utils.argument_utils import ParamGroup
-
-class InitializeParams(ParamGroup):
-    pass
-    # def __init__(self, parser,):
-    #     self.
-    #     super().__init__(parser, "Initialization Parameters")
-
+import json
 
 def main(args):
     data_path = args.path
-    if args.output == None:
-        dir_path = osp.dirname(data_path)
-    else:
-        dir_path = args.output
-    save_path = osp.join(dir_path, "vol_gt" + ".npy")
-    if not osp.exists(save_path):
-        data_5d = nib.ni1.load(data_path).get_fdata()
-        data = data_5d[0, 0, :, :, :]
-        vol_gt = data / np.max(data)
+    dir_path = osp.dirname(data_path) if args.output is None else args.output
+    save_path = osp.join(dir_path, "vol_gt.npy")
+    
+    nii_img = nib.ni1.load(data_path)
+    data_5d = nii_img.get_fdata()
+    data = data_5d[0, 0, ...]
 
+    affine = nii_img.affine
+
+    data = np.clip(data, 0, None)
+    p_99_5 = np.percentile(data, 99.5)
+
+    vol_gt = np.clip(data, 0, p_99_5) / p_99_5
+    
+    offOrigin = affine[:3, 3]
+    nVoxel = np.array(vol_gt.shape)
+    dVoxel = nii_img.header['pixdim'][3:6]
+    sVoxel = nVoxel * dVoxel
+    
+    nii_data_path = osp.join(dir_path, "nii_data.json")
+    nii_data = {
+        "nii_cfg": {
+            "offOrigin": offOrigin.tolist(),
+            "nVoxel": nVoxel.tolist(),
+            "dVoxel": dVoxel.tolist(),
+            "sVoxel": sVoxel.tolist(),
+        },
+        "vol": "vol_gt.npy"
+    }
+
+    with open(nii_data_path,'w',encoding='utf-8') as f:
+        json.dump(nii_data, f, indent=4, ensure_ascii=False)
+
+    if not osp.exists(save_path):
         np.save(save_path, vol_gt)
 
     if False:

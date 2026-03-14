@@ -308,40 +308,34 @@ def readNAFInfo(path, eval):
 
 class SceneInfo_MRI(NamedTuple):
     vol: torch.tensor
-    scanner_cfg: dict
+    nii_cfg: dict
     scene_scale: float
 
 def readMRIInfo(
         path,
 ):
-    dir_name = osp.dirname(path)
-    data_path = osp.join(dir_name, "vol_gt.npy")
-    vol_gt = torch.from_numpy(np.load(data_path)).float().cuda()
-    offOrigin = np.array([0, 0, 0])
-    sVoxel = np.array([2.0, 2.0, 2.0])
-    nVoxel = np.array(vol_gt.shape)
-    dVoxel = sVoxel / nVoxel
+    nii_data_path = osp.join(path, "nii_data.json")
+    with open(nii_data_path, "r") as handle:
+        nii_data = json.load(handle)
 
-    scanner_cfg = {
-        "offOrigin": offOrigin.tolist(),
-        "dVoxel": dVoxel.tolist(),
-        "nVoxel": nVoxel.tolist(),
-        "sVoxel": sVoxel.tolist()
-    }
-    scene_scale = 2 / max(scanner_cfg["sVoxel"])
+    nii_data["vol"] = osp.join(path, nii_data["vol"])
+
+    vol_gt = torch.from_numpy(np.load(nii_data["vol"])).float().cuda()
+    
+    scene_scale = 2 / max(nii_data["nii_cfg"]["sVoxel"])
 
     for key_to_scale in [
         "dVoxel",
         "sVoxel",
         "offOrigin",
     ]:
-        scanner_cfg[key_to_scale] = (
-            np.array(scanner_cfg[key_to_scale]) * scene_scale
+        nii_data["nii_cfg"][key_to_scale] = (
+            np.array(nii_data["nii_cfg"][key_to_scale]) * scene_scale
         ).tolist()
 
     scene_info = SceneInfo_MRI(
         vol=vol_gt,
-        scanner_cfg=scanner_cfg,
+        nii_cfg=nii_data["nii_cfg"],
         scene_scale=scene_scale,
     )
     return scene_info

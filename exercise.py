@@ -16,7 +16,10 @@ from r2_gaussian.gaussian import GaussianModel, initialize_gaussian
 from xray_gaussian_rasterization_voxelization import (
     GaussianRasterizationSettings,
     GaussianRasterizer,
+    GaussianVoxelizationSettings,
+    GaussianVoxelizer,
 )
+from r2_gaussian.gaussian import query
 
 
 # 渲染初始化的高斯
@@ -25,71 +28,40 @@ mp = ModelParams(parser)
 pp = PipelineParams(parser)
 args = parser.parse_args()
 args_dict = vars(args)
-args_dict["source_path"] = 'data/naf_dataset/head_50.pickle'
+args_dict["source_path"] = 'MRIdata'
 args_dict["model_path"] = 'data/naf_dataset/output_2026_3_5'
 
 dataset = mp.extract(args)
 pipe = pp.extract(args)
 
-scene = Scene(dataset,shuffle=False)
+scene = Scene(dataset)
 
-train_cameras = scene.getTrainCameras()
+scale_bound = [0.001, 1.0]
 
-gaussians = GaussianModel(None)
-initialize_gaussian(gaussians, dataset, None)
+gaussians = GaussianModel(scale_bound)
+# initialize_gaussian(gaussians, dataset, None)
 scene.gaussians = gaussians
+ply_path = 'MRIdata/output_2026_3_6/point_cloud/iteration_1000/point_cloud.pickle'
+gaussians.load_ply(ply_path)
 
-## 取第一个相机
-viewpoint_cam = train_cameras[0]
+print(gaussians.get_scaling)
 
-mean2D = torch.zeros_like(gaussians.get_xyz, dtype=gaussians.get_xyz.dtype, requires_grad=True, device="cuda") + 0.0
-mode = viewpoint_cam.mode
-tanfovx = math.tan(viewpoint_cam.FoVx * 0.5)
-tanfovy = math.tan(viewpoint_cam.FoVy * 0.5)
-raster_setting = GaussianRasterizationSettings(
-    image_height=int(viewpoint_cam.image_height),
-    image_width=int(viewpoint_cam.image_width),
-    tanfovx=tanfovx,
-    tanfovy=tanfovy,
-    scale_modifier=1.0,
-    viewmatrix=viewpoint_cam.world_view_transform,
-    projmatrix=viewpoint_cam.full_proj_transform,
-    campos=viewpoint_cam.camera_center,
-    prefiltered=False,
-    mode=mode,
-    debug=pipe.debug,
-)
-rasterizer = GaussianRasterizer(raster_settings=raster_setting)
+queryfunc = lambda x: query(
+        x,
+        [0,0,0],
+        [32,32,32],
+        [1.4914,2,2],
+        pipe,
+    )
 
-mean3D = gaussians.get_xyz
-density = gaussians.get_density
-scales = gaussians.get_scaling
-rotations = gaussians.get_rotation
-
-rendered_image, radii = rasterizer(
-    means3D=mean3D,
-    means2D=mean2D,
-    opacities=density,
-    scales=scales,
-    rotations=rotations,
-    cov3D_precomp=None,
-)
-if True:
-    img = rendered_image.detach().cpu().clone().numpy().transpose(1,2,0)
-    plt.figure(figsize=(10,20))
-    plt.subplot(1,2,1)
-    plt.imshow(img)
-    plt.title("Rendering image")
-    plt.axis("off")
-
-    plt.subplot(1,2,2)
-    plt.imshow(viewpoint_cam.original_image.cpu().numpy().transpose(1,2,0))
-    plt.title("Original image")
-    plt.axis("off")
-
-    plt.show()
+gt_vol = queryfunc(gaussians)["vol"]
 
 
+import pyvista as pv
+plotter = pv.Plotter(window_size=(800,800))
+plotter.subplot(0, 0)
+plotter.add_volume(gt_vol.cpu().detach().numpy(), cmap="viridis")
+plotter.show()
 print(1)
 
 
