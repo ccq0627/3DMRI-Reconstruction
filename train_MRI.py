@@ -45,8 +45,8 @@ def training(
 
     # Set up dataset
     scene = Scene(dataset)
-
     gt_vol = scene.vol_gt  # device = cuda
+
     # Set up some parameters
     nii_cfg = scene.nii_cfg
     bbox = scene.bbox
@@ -77,18 +77,11 @@ def training(
     initialize_gaussian(gaussians, dataset, None)
     scene.gaussians = gaussians
     gaussians.training_setup(opt)
+
     if checkpoint is not None:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
         print(f"Load checkpoint {osp.basename(checkpoint)}.")
-
-    # Set up different stages' size of nVoxel
-    # stages = {
-    #     "1": torch.tensor([32, 43, 43]),
-    #     "2": torch.tensor([65, 87, 87]),
-    #     "3": torch.tensor([130, 175, 175]),
-    #     "4": torch.tensor([261, 350, 350]),
-    # }
 
     # Set up loss
     use_tv = opt.lambda_tv > 0
@@ -104,7 +97,7 @@ def training(
     iter_end = torch.cuda.Event(enable_timing=True)
     ckpt_save_path = osp.join(scene.model_path, "ckpt")
     os.makedirs(ckpt_save_path, exist_ok=True)
-    viewpoint_stack = None
+
     progress_bar = tqdm(range(0, opt.iterations), desc="Train", leave=False)
     progress_bar.update(first_iter)
     first_iter += 1
