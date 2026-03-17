@@ -3,7 +3,10 @@ import sys
 import uuid
 import os.path as osp
 from argparse import Namespace
-import yaml
+import yaml, json
+import os.path as osp
+from datetime import datetime
+from r2_gaussian.arguments import OptimizationParams,ModelParams
 
 try:
     from tensorboardX import SummaryWriter
@@ -46,3 +49,17 @@ def prepare_output_and_logger(args):
     else:
         print("Tensorboard not available: not logging progress")
     return tb_writer
+
+
+def setup_experiment_folder(opt: OptimizationParams,lpt: ModelParams, base_dir="MRIdata/outputs"):
+    time_str = datetime.now().strftime("%m%d_%H%M")
+    exp_name = f"exp_{time_str}_iter{opt.iterations}_L1loss_{lpt.model}" if opt.use_L1 == True else f"exp_{time_str}_iter{opt.iterations}_L2loss_{lpt.model}"
+    
+    exp_dir = osp.join(base_dir, exp_name)
+    os.makedirs(exp_dir, exist_ok=True)
+    
+    config_path = osp.join(exp_dir, "exp_config.json")
+    with open(config_path, 'w', encoding='utf-8') as f:
+        json.dump(vars(opt), f, indent=4)
+        
+    return exp_dir

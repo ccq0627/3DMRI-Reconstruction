@@ -37,9 +37,9 @@ def initialize_gaussian(gaussians: GaussianModel, args: ModelParams, loaded_iter
                     "init_" + osp.basename(args.source_path).split(".")[0] + ".npy",
                 )
             # add MRI format
-            elif osp.exists(osp.join(args.source_path, "nii_data.json")):
+            elif osp.exists(osp.join(args.source_path, args.model, "nii_data.json")):
                 ply_path = osp.join(
-                    args.source_path, "Init_pointcloud.npy"
+                    args.source_path, args.model, "Init_pointcloud.npy"
                 )
             else:
                 raise ValueError("Could not recognize scene type!")

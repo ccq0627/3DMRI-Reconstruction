@@ -18,19 +18,21 @@ from tqdm import tqdm
 from argparse import ArgumentParser
 import numpy as np
 import yaml
+import torch.nn.functional as F
 
 sys.path.append("./")
 from r2_gaussian.arguments import ModelParams, OptimizationParams, PipelineParams
 from r2_gaussian.gaussian import GaussianModel, render, query, initialize_gaussian
-from r2_gaussian.utils.general_utils import safe_state
+from r2_gaussian.utils.general_utils import safe_state, get_mask
 from r2_gaussian.utils.cfg_utils import load_config
-from r2_gaussian.utils.log_utils import prepare_output_and_logger
+from r2_gaussian.utils.log_utils import prepare_output_and_logger, setup_experiment_folder
 from r2_gaussian.dataset import Scene
-from r2_gaussian.utils.loss_utils import l1_loss, ssim, tv_3d_loss
+from r2_gaussian.utils.loss_utils import l1_loss, ssim, tv_3d_loss, L2_loss
 from r2_gaussian.utils.image_utils import metric_vol, metric_proj
 from r2_gaussian.utils.plot_utils import show_two_slice
 
-
+# 原始数据： k_space (ifft)->  MRI (initialize gs)-> TV loss (query)-> 
+# pred MRI (fft)-> pred kspace -> compute loss
 def training(
     dataset: ModelParams,
     opt: OptimizationParams,
@@ -45,7 +47,8 @@ def training(
 
     # Set up dataset
     scene = Scene(dataset)
-    gt_vol = scene.vol_gt  # device = cuda
+    gt_vol_kspace = scene.vol_gt_kspace  # device = cuda  欠采样点的kspace
+    mask = scene.mask
 
     # Set up some parameters
     nii_cfg = scene.nii_cfg
@@ -84,7 +87,9 @@ def training(
         print(f"Load checkpoint {osp.basename(checkpoint)}.")
 
     # Set up loss
-    use_tv = opt.lambda_tv > 0
+    use_tv = False
+    if opt.lambda_tv is not None:
+        use_tv = opt.lambda_tv > 0
     if use_tv:
         print("Use total variation loss")
         # tv_vol_size = 32
@@ -108,31 +113,44 @@ def training(
         gaussians.update_learning_rate(iteration)
 
         # query volume
-        pred_vol = queryfunc(gaussians)["vol"]
+        pred_vol = queryfunc(gaussians)["vol"]  # 图像域 device:cuda
+        # fft获得kspace
+        if not pred_vol.is_complex():
+            pred_vol_complex = torch.complex(pred_vol, torch.zeros_like(pred_vol))
+        else:
+            pred_vol_complex = pred_vol
+        pred_vol_kspace = torch.fft.fftshift(
+            torch.fft.fftn(torch.fft.ifftshift(pred_vol_complex), norm='ortho')
+        )
+        
         # # Compute loss
         # 直接使用体积compute loss
         loss = {"total": 0.0}
-        render_loss = l1_loss(pred_vol, gt_vol)
-        loss["render"] = render_loss
-        loss["total"] += loss["render"]
-        if opt.lambda_dssim > 0:
-            loss_dssim = 1.0 - ssim(pred_vol, gt_vol)
-            loss["dssim"] = loss_dssim
-            loss["total"] = loss["total"] + opt.lambda_dssim * loss_dssim
+        pred_sampled = pred_vol_kspace[mask.bool()]
+        gt_sampled = gt_vol_kspace[mask.bool()] # gt_vol_kspace 必须只有实测的那些点有值
+        
+        dc_loss = L2_loss(pred_sampled, gt_sampled)
+
+        loss["dc_loss"] = dc_loss
+        
+        loss["total"] += loss["dc_loss"]
+        # if opt.lambda_dssim > 0:
+        #     loss_dssim = 1.0 - ssim(pred_vol, gt_vol)
+        #     loss["dssim"] = loss_dssim
+        #     loss["total"] = loss["total"] + opt.lambda_dssim * loss_dssim
         # 3D TV loss
         if use_tv:
-            # Randomly get the tiny volume center
-            tv_vol_center = (bbox[0] + tv_vol_sVoxel / 2) + (
-                bbox[1] - tv_vol_sVoxel - bbox[0]
-            ) * torch.rand(3)
-            vol_pred = query(
-                gaussians,
-                tv_vol_center,
-                tv_vol_nVoxel,
-                tv_vol_sVoxel,
-                pipe,
-            )["vol"]
-            loss_tv = tv_3d_loss(vol_pred, reduction="mean")  # 计算TV损失 用于保证空间连续性同时保留锐利边缘
+            # tv_vol_center = (bbox[0] + tv_vol_sVoxel / 2) + (
+            #     bbox[1] - tv_vol_sVoxel - bbox[0]
+            # ) * torch.rand(3)
+            # vol_pred = query(
+            #     gaussians,
+            #     tv_vol_center,
+            #     tv_vol_nVoxel,
+            #     tv_vol_sVoxel,
+            #     pipe,
+            # )["vol"]
+            loss_tv = tv_3d_loss(pred_vol, reduction="mean")
             loss["tv"] = loss_tv
             loss["total"] = loss["total"] + opt.lambda_tv * loss_tv
 
@@ -172,6 +190,7 @@ def training(
             # Save gaussians
             if iteration in saving_iterations or iteration == opt.iterations:
                 tqdm.write(f"[ITER {iteration}] Saving Gaussians")
+                tqdm.write(f"[ITER {iteration}] Computing Loss: {loss['total'].item():.1e}")
                 scene.save(iteration, queryfunc)
 
             # Save checkpoints
@@ -239,16 +258,19 @@ def training_report(
         vol_pred = queryFunc(scene.gaussians)["vol"]
         vol_gt = scene.vol_gt  # device = cuda
         psnr_3d, _ = metric_vol(vol_gt, vol_pred, "psnr")
-        ssim_3d, ssim_3d_axis = metric_vol(vol_gt, vol_pred, "ssim")
+        # ssim_3d, ssim_3d_axis = metric_vol(vol_gt, vol_pred, "ssim")
         eval_dict = {
             "psnr_3d": psnr_3d,
-            "ssim_3d": ssim_3d,
-            "ssim_3d_x": ssim_3d_axis[0],
-            "ssim_3d_y": ssim_3d_axis[1],
-            "ssim_3d_z": ssim_3d_axis[2],
+            # "ssim_3d": ssim_3d,
+            # "ssim_3d_x": ssim_3d_axis[0],
+            # "ssim_3d_y": ssim_3d_axis[1],
+            # "ssim_3d_z": ssim_3d_axis[2],
         }
         with open(osp.join(eval_save_path, "eval3d.yml"), "w") as f:
             yaml.dump(eval_dict, f, default_flow_style=False, sort_keys=False)
+
+        # if iteration == testing_iterations[-1]:
+
         # tv_writer = None (default)
         if tb_writer:
             image_show_3d = np.concatenate(
@@ -275,7 +297,7 @@ def training_report(
             tb_writer.add_scalar("reconstruction/psnr_3d", psnr_3d, iteration)
             tb_writer.add_scalar("reconstruction/ssim_3d", ssim_3d, iteration)
         tqdm.write(
-            f"[ITER {iteration}] Evaluating: psnr3d {psnr_3d:.3f}, ssim3d {ssim_3d:.3f}"
+            f"[ITER {iteration}] Evaluating: psnr3d {psnr_3d:.3f}, pts: {scene.gaussians.get_xyz.shape[0]:5d}"
         )
 
         # Record other metrics
@@ -295,8 +317,8 @@ if __name__ == "__main__":
     op = OptimizationParams(parser)
     pp = PipelineParams(parser)
     parser.add_argument("--detect_anomaly", action="store_true", default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[1, 10, 100, 500, 1000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[1, 10, 100, 500, 1000])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[1, 500, 1000,1500,2000,2500,3000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[1, 500, 1000,1500,2000,2500,3000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default=None)
@@ -318,8 +340,9 @@ if __name__ == "__main__":
         for key in list(cfg.keys()):
             args_dict[key] = cfg[key]
 
+    args.model_path = setup_experiment_folder(op,lp)
     # Set up logging writer
-    # Set up output folder and return SummaryWriter
+    # Set up output folder(if None) and return SummaryWriter
     tb_writer = prepare_output_and_logger(args)
 
     print("Optimizing " + args.model_path)

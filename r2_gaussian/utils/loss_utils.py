@@ -41,6 +41,8 @@ def l1_loss(network_output, gt):
 def l2_loss(network_output, gt):
     return ((network_output - gt) ** 2).mean()
 
+def L2_loss(network_output, gt):
+    return ((torch.abs(network_output - gt))**2).mean()
 
 def gaussian(window_size, sigma):
     gauss = torch.Tensor(

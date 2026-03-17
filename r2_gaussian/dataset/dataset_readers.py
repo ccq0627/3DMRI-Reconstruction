@@ -308,19 +308,29 @@ def readNAFInfo(path, eval):
 
 class SceneInfo_MRI(NamedTuple):
     vol: torch.tensor
+    vol_unsampled: torch.tensor
+    vol_kspace: torch.tensor
+    mask: torch.tensor
     nii_cfg: dict
     scene_scale: float
 
 def readMRIInfo(
         path,
+        model="full" # full or under
 ):
-    nii_data_path = osp.join(path, "nii_data.json")
+    nii_data_path = osp.join(path, model, "nii_data.json")
     with open(nii_data_path, "r") as handle:
         nii_data = json.load(handle)
 
-    nii_data["vol"] = osp.join(path, nii_data["vol"])
+    nii_data["vol"] = osp.join(path, model, nii_data["vol"])  # save gt
+    nii_data["vol_kspace"] = osp.join(path, model, nii_data["vol_kspace"])  # compute loss
+    nii_data["mask_3D"] = osp.join(path, model, nii_data["mask_3D"]) # 
+    nii_data["vol_unsampled"] = osp.join(path, model, nii_data["vol_unsampled"])
 
     vol_gt = torch.from_numpy(np.load(nii_data["vol"])).float().cuda()
+    vol_gt_unsampled = torch.from_numpy(np.load(nii_data["vol_unsampled"])).float().cuda()
+    kspace_vol_gt = torch.from_numpy(np.load(nii_data["vol_kspace"])).cuda()
+    mask_3D = torch.from_numpy(np.load(nii_data["mask_3D"])).cuda()
     
     scene_scale = 2 / max(nii_data["nii_cfg"]["sVoxel"])
 
@@ -335,6 +345,9 @@ def readMRIInfo(
 
     scene_info = SceneInfo_MRI(
         vol=vol_gt,
+        vol_unsampled=vol_gt_unsampled,
+        vol_kspace=kspace_vol_gt,
+        mask=mask_3D,
         nii_cfg=nii_data["nii_cfg"],
         scene_scale=scene_scale,
     )

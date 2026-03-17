@@ -35,7 +35,7 @@ Use `train_MRI.py` to train Gaussians. Make sure that the initialization file `*
 
 ```sh
 # Training
-python train.py
+python train_MRI.py
 ```
 
 ## 4. Acknowledgement, license and citation
