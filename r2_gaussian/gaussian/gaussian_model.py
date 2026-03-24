@@ -513,6 +513,50 @@ class GaussianModel:
             new_max_radii3D,
         )
 
+    def split_for_bigGS(self, densify_scale_threshold, N=2):
+        n_init_points = self.get_xyz.shape[0]
+        # Extract points that satisfy the gradient condition
+        selected_pts_mask = torch.zeros((n_init_points), device="cuda")
+        selected_pts_mask = torch.logical_and(
+            selected_pts_mask,
+            torch.max(self.get_scaling, dim=1).values > densify_scale_threshold,
+        )
+
+        stds = self.get_scaling[selected_pts_mask].repeat(N, 1)
+        means = torch.zeros((stds.size(0), 3), device="cuda")
+        samples = torch.normal(mean=means, std=stds)
+        rots = build_rotation(self._rotation[selected_pts_mask]).repeat(N, 1, 1)
+        new_xyz = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_xyz[
+            selected_pts_mask
+        ].repeat(N, 1)
+        new_scaling = self.scaling_inverse_activation(
+            self.get_scaling[selected_pts_mask].repeat(N, 1) / (0.8 * N)
+        )
+        new_rotation = self._rotation[selected_pts_mask].repeat(N, 1)
+        # new_density = self._density[selected_pts_mask].repeat(N, 1)
+        new_density = self.density_inverse_activation(
+            self.get_density[selected_pts_mask].repeat(N, 1) * (1 / N)
+        )
+        new_max_radii2D = self.max_radii2D[selected_pts_mask].repeat(N)
+        new_max_radii3D = self.max_radii3D[selected_pts_mask].repeat(N)
+
+        self.densification_postfix(
+            new_xyz,
+            new_density,
+            new_scaling,
+            new_rotation,
+            new_max_radii2D,
+            new_max_radii3D,
+        )
+
+        prune_filter = torch.cat(
+            (
+                selected_pts_mask,
+                torch.zeros(N * selected_pts_mask.sum(), device="cuda", dtype=bool),
+            )
+        )
+        self.prune_points(prune_filter)
+
     def densify_and_prune(
         self,
         max_grad,
@@ -535,26 +579,29 @@ class GaussianModel:
 
         # Prune gaussians with too small density
         # 密度太小的高斯不参与贡献
-        prune_mask = (self.get_density < min_density).squeeze()
+        # prune_mask = (self.get_density < min_density).squeeze()
         # Prune gaussians outside the bbox
-        if bbox is not None:
-            xyz = self.get_xyz
-            prune_mask_xyz = (
-                (xyz[:, 0] < bbox[0, 0])
-                | (xyz[:, 0] > bbox[1, 0])
-                | (xyz[:, 1] < bbox[0, 1])
-                | (xyz[:, 1] > bbox[1, 1])
-                | (xyz[:, 2] < bbox[0, 2])
-                | (xyz[:, 2] > bbox[1, 2])
-            )
+        # if bbox is not None:
+        #     xyz = self.get_xyz
+        #     prune_mask_xyz = (
+        #         (xyz[:, 0] < bbox[0, 0])
+        #         | (xyz[:, 0] > bbox[1, 0])
+        #         | (xyz[:, 1] < bbox[0, 1])
+        #         | (xyz[:, 1] > bbox[1, 1])
+        #         | (xyz[:, 2] < bbox[0, 2])
+        #         | (xyz[:, 2] > bbox[1, 2])
+        #     )
 
-            prune_mask = prune_mask | prune_mask_xyz
+        #     prune_mask = prune_mask | prune_mask_xyz
 
-        if max_scale:
-            big_points_ws = self.get_scaling.max(dim=1).values > max_scale
-            prune_mask = torch.logical_or(prune_mask, big_points_ws)
+        # if max_scale:
+        #     big_points_ws = self.get_scaling.max(dim=1).values > max_scale
+        #     prune_mask = torch.logical_or(prune_mask, big_points_ws)
+        # split for big gs
+        # if max_scale:
+        #     self.split_for_bigGS(max_scale)
         
-        self.prune_points(prune_mask)
+        # self.prune_points(prune_mask)
 
         torch.cuda.empty_cache()
 

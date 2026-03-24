@@ -14,7 +14,7 @@ np.random.seed(0)
 class InitParams_MRI(ParamGroup):
     def __init__(self, parser):
         self.n_points = 60_000
-        self.density_thresh = 0.5
+        self.density_thresh = 0.2
         self.density_rescale = 0.2
         super().__init__(parser, "Initialization Parameters")
 

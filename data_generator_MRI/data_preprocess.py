@@ -13,6 +13,11 @@ sys.path.append("./")
 from r2_gaussian.utils.general_utils import get_mask
 from POCS import pocs_reconstruction
 
+def fft(image):
+    return np.fft.fftshift(np.fft.fftn(np.fft.ifftshift(image), norm='ortho'))
+
+def ifft(kspace):
+    return np.fft.fftshift(np.fft.ifftn(np.fft.ifftshift(kspace), norm='ortho'))
 
 def main(args):
     """
@@ -27,8 +32,8 @@ def main(args):
     mask_save_path = osp.join(dir_path, "mask_3D.npy")
     
     nii_img = nib.ni1.load(data_path)
-    data = np.array(nii_img.dataobj[0, 0, ...], dtype=np.float32)
-
+    data = np.array(nii_img.dataobj[:,:,:], dtype=np.float32).transpose(1,0,2)
+    # data = np.array(nii_img.dataobj[0,0,:,:,:], dtype=np.float32)
     affine = nii_img.affine
 
     np.clip(data, 0, None, out=data)
@@ -39,7 +44,8 @@ def main(args):
     
     offOrigin = affine[:3, 3]
     nVoxel = np.array(vol_gt.shape)
-    dVoxel = nii_img.header['pixdim'][3:6]
+    dVoxel = nii_img.header['pixdim'][1:4]
+    # dVoxel = nii_img.header['pixdim'][3:6]
     sVoxel = nVoxel * dVoxel
     
     nii_data_path = osp.join(dir_path, "nii_data.json")
@@ -54,14 +60,15 @@ def main(args):
         "vol_unsampled": "vol_gt_unsampled.npy",
         "vol_kspace": "kspace_gt.npy",
         "mask_3D": "mask_3D.npy",
-        "mode": str(args.model)
+        "mode": str(args.model),
+        "sampling_rate": 0.1 if args.model == "under" else 1.0,
     }
     with open(nii_data_path,'w',encoding='utf-8') as f:
         json.dump(nii_data, f, indent=4, ensure_ascii=False)
 
     np.save(vol_save_path, vol_gt)
     # get kspace data full
-    kspace_full = sfft.fftshift(sfft.fftn(sfft.ifftshift(vol_gt), norm='ortho', workers=-1))
+    kspace_full = fft(vol_gt)
     kspace_full = kspace_full.astype(np.complex64) # 强制转为单精度复数，内存减半！
 
     # kspace_full = np.fft.fftshift(
@@ -100,22 +107,10 @@ def main(args):
     del vol_gt_undersampled_mag
     gc.collect()
 
-    recon_pocs = pocs_reconstruction(kspace_undersampled,mask_3d)
-    
-    recon_denoised = gaussian_filter(recon_pocs, sigma=1.5)  # 高斯去噪
-
-    del recon_pocs
-    gc.collect()
-
-    recon_final = recon_denoised / np.max(recon_denoised)  # POCS重建结果，用于初始化点云
-    pocs_recon_save_path = osp.join(dir_path, "pocs_recon.npy")
-
-    np.save(pocs_recon_save_path, recon_final)
-
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("--path", type=str, help="Path to MRI data", default="MRIdata/00000.nii.gz")
+    parser.add_argument("--path", type=str, help="Path to MRI data", default="MRIdata/IXI002-Guys-0828-T1.nii.gz")
     parser.add_argument("--model", type=str, help="Sample model(full or under)", default="under")
 
     args = parser.parse_args()

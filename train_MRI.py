@@ -129,15 +129,27 @@ def training(
         pred_sampled = pred_vol_kspace[mask.bool()]
         gt_sampled = gt_vol_kspace[mask.bool()] # gt_vol_kspace 必须只有实测的那些点有值
         
-        dc_loss = L2_loss(pred_sampled, gt_sampled)
+        dc_loss = l1_loss(pred_sampled, gt_sampled)
 
         loss["dc_loss"] = dc_loss
         
         loss["total"] += loss["dc_loss"]
-        # if opt.lambda_dssim > 0:
-        #     loss_dssim = 1.0 - ssim(pred_vol, gt_vol)
-        #     loss["dssim"] = loss_dssim
-        #     loss["total"] = loss["total"] + opt.lambda_dssim * loss_dssim
+
+        # image domain loss
+        
+        # pred_vol_image = torch.fft.fftshift(
+        #     torch.fft.ifftn(torch.fft.ifftshift(pred_vol_kspace * mask), norm='ortho')
+        # )
+        # gt_vol_image = torch.fft.fftshift(
+        #     torch.fft.ifftn(torch.fft.ifftshift(gt_vol_kspace * mask), norm='ortho')
+        # )
+
+        # dc_loss_image = L2_loss(pred_vol_image, gt_vol_image)
+
+        # loss["dc_loss_image"] = dc_loss_image
+        
+        # loss["total"] += loss["dc_loss_image"]
+
         # 3D TV loss
         if use_tv:
             # tv_vol_center = (bbox[0] + tv_vol_sVoxel / 2) + (
@@ -190,7 +202,7 @@ def training(
             # Save gaussians
             if iteration in saving_iterations or iteration == opt.iterations:
                 tqdm.write(f"[ITER {iteration}] Saving Gaussians")
-                tqdm.write(f"[ITER {iteration}] Computing Loss: {loss['total'].item():.1e}")
+                tqdm.write(f"[ITER {iteration}] Computing Loss: {loss['total'].item():.7f}")
                 scene.save(iteration, queryfunc)
 
             # Save checkpoints
@@ -205,7 +217,7 @@ def training(
             if iteration % 5 == 0:
                 progress_bar.set_postfix(
                     {
-                        "loss": f"{loss['total'].item():.1e}",
+                        "loss": f"{loss['total'].item():.7f}",
                         "pts": f"{gaussians.get_density.shape[0]}",
                     }
                 )
@@ -295,7 +307,7 @@ def training_report(
                 global_step=iteration,
             )
             tb_writer.add_scalar("reconstruction/psnr_3d", psnr_3d, iteration)
-            tb_writer.add_scalar("reconstruction/ssim_3d", ssim_3d, iteration)
+            # tb_writer.add_scalar("reconstruction/ssim_3d", ssim_3d, iteration)
         tqdm.write(
             f"[ITER {iteration}] Evaluating: psnr3d {psnr_3d:.3f}, pts: {scene.gaussians.get_xyz.shape[0]:5d}"
         )

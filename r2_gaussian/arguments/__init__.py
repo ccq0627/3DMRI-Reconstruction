@@ -45,30 +45,30 @@ class PipelineParams(ParamGroup):
 
 class OptimizationParams(ParamGroup):
     def __init__(self, parser):
-        self.iterations = 1_000
+        self.iterations = 20_000
         self.position_lr_init = 0.002
-        self.position_lr_final = 0.0002
-        self.position_lr_max_steps = 1_000
+        self.position_lr_final = 0.000002
+        self.position_lr_max_steps = 20_000
         self.density_lr_init = 0.01
-        self.density_lr_final = 0.001
-        self.density_lr_max_steps = 1_000
+        self.density_lr_final = 0.00001
+        self.density_lr_max_steps = 20_000
         self.scaling_lr_init = 0.005
-        self.scaling_lr_final = 0.0005
-        self.scaling_lr_max_steps = 1_000
+        self.scaling_lr_final = 0.00005
+        self.scaling_lr_max_steps = 20_000
         self.rotation_lr_init = 0.001
-        self.rotation_lr_final = 0.0001
-        self.rotation_lr_max_steps = 1_000
+        self.rotation_lr_final = 0.00001
+        self.rotation_lr_max_steps = 20_000
         self.lambda_dssim = None  # ssim loss weight
-        self.lambda_tv = 0.05  # tv regularization weight
+        self.lambda_tv = 0.20  # tv regularization weight
         self.use_L1 = False 
         self.tv_vol_size = 32
-        self.density_min_threshold = 0.00001
-        self.densification_interval = 50
-        self.densify_from_iter = 100
-        self.densify_until_iter = 900
-        self.densify_grad_threshold = 5.0e-6
-        self.densify_scale_threshold = 0.1  # percent of volume size
-        self.max_scale = None  # percent of volume size
+        self.density_min_threshold = 0.000001
+        self.densification_interval = 200
+        self.densify_from_iter = 500
+        self.densify_until_iter = 18_000
+        self.densify_grad_threshold = 5.0e-06
+        self.densify_scale_threshold = 0.05  # percent of volume size
+        self.max_scale = 0.05  # percent of volume size
         self.max_num_gaussians = 500_000
         super().__init__(parser, "Optimization Parameters")
 
