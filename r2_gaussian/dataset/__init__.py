@@ -31,7 +31,7 @@ class Scene:
         args: ModelParams,
     ):
         self.model_path = args.model_path
-        
+        args.source_path = osp.join(args.source_path, f"acc_rate{args.accelerate_factor}") 
         # don't need camera
         # self.train_cameras = {}
         # self.test_cameras = {}
@@ -49,10 +49,9 @@ class Scene:
                 args.source_path,
                 args.eval,
             )
-        elif osp.exists(osp.join(args.source_path, args.model, "nii_data.json")):
+        elif osp.exists(osp.join(args.source_path, "nii_data.json")):
             scene_info = sceneLoadTypeCallbacks["MRI"](
                 args.source_path,
-                args.model
             )
         else:
             assert False, f"Could not recognize scene type: {args.source_path}."

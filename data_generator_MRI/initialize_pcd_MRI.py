@@ -13,9 +13,9 @@ np.random.seed(0)
 
 class InitParams_MRI(ParamGroup):
     def __init__(self, parser):
-        self.n_points = 60_000
-        self.density_thresh = 0.2
-        self.density_rescale = 0.2
+        self.n_points = 200_000
+        self.density_thresh = 0.05
+        self.density_rescale = 0.1
         super().__init__(parser, "Initialization Parameters")
 
 
@@ -24,14 +24,12 @@ def main(args, init_parser: InitParams_MRI, model_args: ModelParams):
     model_args.source_path = data_path
     scene = Scene(model_args)
     nii_cfg = scene.nii_cfg
-    model = model_args.model
-    # vol = scene.vol_gt_unsampled.cpu().numpy()
-    path = 'MRIdata/under/pocs_recon.npy'
-    vol = np.load(path)
+    vol = scene.vol_gt_unsampled.cpu().numpy()
+    # vol = np.load('MRIdata/under/pocs_recon.npy')
 
     save_path = args.output
     if not save_path:
-        save_path = osp.join(data_path, model, "Init_pointcloud" + ".npy")
+        save_path = osp.join(data_path, f"acc_rate{model_args.accelerate_factor}", "Init_pointcloud" + ".npy")
 
     assert not osp.exists(
         save_path

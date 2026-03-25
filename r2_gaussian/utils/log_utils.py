@@ -53,7 +53,7 @@ def prepare_output_and_logger(args):
 
 def setup_experiment_folder(opt: OptimizationParams,lpt: ModelParams, base_dir="MRIdata/outputs"):
     time_str = datetime.now().strftime("%m%d_%H%M")
-    exp_name = f"exp_{time_str}_iter{opt.iterations}_l1_{lpt.model}" 
+    exp_name = f"exp_{time_str}_iter{opt.iterations}_{lpt.accelerate_factor}" 
     
     exp_dir = osp.join(base_dir, exp_name)
     os.makedirs(exp_dir, exist_ok=True)

@@ -580,7 +580,8 @@ class GaussianModel:
         # Prune gaussians with too small density
         # 密度太小的高斯不参与贡献
         # prune_mask = (self.get_density < min_density).squeeze()
-        # Prune gaussians outside the bbox
+        # prune_mask = torch.zeros_like(self.get_density, dtype=bool).squeeze()
+        # # Prune gaussians outside the bbox
         # if bbox is not None:
         #     xyz = self.get_xyz
         #     prune_mask_xyz = (
@@ -598,8 +599,8 @@ class GaussianModel:
         #     big_points_ws = self.get_scaling.max(dim=1).values > max_scale
         #     prune_mask = torch.logical_or(prune_mask, big_points_ws)
         # split for big gs
-        # if max_scale:
-        #     self.split_for_bigGS(max_scale)
+        if max_scale:
+            self.split_for_bigGS(max_scale)
         
         # self.prune_points(prune_mask)
 
@@ -614,7 +615,7 @@ class GaussianModel:
     #     self.denom[update_filter] += 1
 
     def add_densification_stats(self):
-        self.xyz_gradient_accum = torch.norm(
+        self.xyz_gradient_accum += torch.norm(
             self._xyz.grad, dim=-1, keepdim=True
         )
         self.denom += 1

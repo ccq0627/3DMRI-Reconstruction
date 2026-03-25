@@ -5,13 +5,11 @@ import os
 from argparse import ArgumentParser
 import sys
 import json
-from scipy.ndimage import gaussian_filter
 import gc
-import scipy.fft as sfft
 
 sys.path.append("./")
 from r2_gaussian.utils.general_utils import get_mask
-from POCS import pocs_reconstruction
+from r2_gaussian.arguments import ModelParams
 
 def fft(image):
     return np.fft.fftshift(np.fft.fftn(np.fft.ifftshift(image), norm='ortho'))
@@ -19,15 +17,17 @@ def fft(image):
 def ifft(kspace):
     return np.fft.fftshift(np.fft.ifftn(np.fft.ifftshift(kspace), norm='ortho'))
 
-def main(args):
+def main(args, lp: ModelParams):
     """
     get kspace and niicfg
     """
     data_path = args.path
-    dir_path = osp.join(osp.dirname(data_path),"full") if args.model == "full" else osp.join(osp.dirname(data_path),"under")
+    if lp.accelerate_factor is not None:
+        accelerate_factor = lp.accelerate_factor
+    dir_path = osp.join(osp.dirname(data_path),f"acc_rate{accelerate_factor}")
     os.makedirs(dir_path, exist_ok=True)
-    ks_save_path = osp.join(dir_path, "kspace_gt.npy")
-    vol_unsampled_save_path = osp.join(dir_path, "vol_gt_unsampled.npy")
+    ks_save_path = osp.join(dir_path, "kspace_gt.npy")  # 欠采样kspace 
+    vol_unsampled_save_path = osp.join(dir_path, "vol_gt_unsampled.npy")  # IFFT
     vol_save_path = osp.join(dir_path, "vol_gt.npy")
     mask_save_path = osp.join(dir_path, "mask_3D.npy")
     
@@ -60,8 +60,7 @@ def main(args):
         "vol_unsampled": "vol_gt_unsampled.npy",
         "vol_kspace": "kspace_gt.npy",
         "mask_3D": "mask_3D.npy",
-        "mode": str(args.model),
-        "sampling_rate": 0.1 if args.model == "under" else 1.0,
+        "accelerate_factor": accelerate_factor,
     }
     with open(nii_data_path,'w',encoding='utf-8') as f:
         json.dump(nii_data, f, indent=4, ensure_ascii=False)
@@ -78,11 +77,9 @@ def main(args):
     gc.collect()
 
     # get mask
-    if args.model == "full":
-        mask_3d = get_mask(size=nVoxel,per=1.0)
-    elif args.model == "under":
-        mask_3d = get_mask(size=nVoxel,per=0.1)
+    mask_3d = get_mask(size=nVoxel,per=1.0/accelerate_factor)
     np.save(mask_save_path, mask_3d)
+    
     # get kspace undersampled
     kspace_undersampled = kspace_full * mask_3d  # complex
     
@@ -90,13 +87,8 @@ def main(args):
     gc.collect()
 
     np.save(ks_save_path, kspace_undersampled)
-    # 伪gt 用于可视化 和采样点
-    # vol_gt_undersampled = np.fft.fftshift(
-    #     np.fft.ifftn(np.fft.ifftshift(kspace_undersampled), norm='ortho')
-    # )
-    # vol_gt_undersampled_mag = np.abs(vol_gt_undersampled)  # float
-    # vol_gt_undersampled_mag = vol_gt_undersampled_mag / np.max(vol_gt_undersampled_mag)
-    vol_gt_undersampled = sfft.fftshift(sfft.ifftn(sfft.ifftshift(kspace_undersampled), norm='ortho', workers=-1))
+    # IFFT 用于可视化和采样点
+    vol_gt_undersampled = ifft(kspace_undersampled)
     vol_gt_undersampled_mag = np.abs(vol_gt_undersampled).astype(np.float32)
 
     del vol_gt_undersampled # 释放复数矩阵
@@ -110,9 +102,11 @@ def main(args):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
+    lp = ModelParams(parser)
     parser.add_argument("--path", type=str, help="Path to MRI data", default="MRIdata/IXI002-Guys-0828-T1.nii.gz")
-    parser.add_argument("--model", type=str, help="Sample model(full or under)", default="under")
-
+    # parser.add_argument("--path", type=str, help="Path to MRI data", default="MRIdata/00000.nii.gz")
+    # parser.add_argument("--accelerate_factor", type=int, help="Accelerate factor", default=2)
+    
     args = parser.parse_args()
 
-    main(args)
+    main(args, lp)

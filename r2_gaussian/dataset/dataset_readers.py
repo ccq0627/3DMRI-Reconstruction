@@ -316,16 +316,15 @@ class SceneInfo_MRI(NamedTuple):
 
 def readMRIInfo(
         path,
-        model="full" # full or under
 ):
-    nii_data_path = osp.join(path, model, "nii_data.json")
+    nii_data_path = osp.join(path, "nii_data.json")
     with open(nii_data_path, "r") as handle:
         nii_data = json.load(handle)
 
-    nii_data["vol"] = osp.join(path, model, nii_data["vol"])  # save gt
-    nii_data["vol_kspace"] = osp.join(path, model, nii_data["vol_kspace"])  # compute loss
-    nii_data["mask_3D"] = osp.join(path, model, nii_data["mask_3D"]) # 
-    nii_data["vol_unsampled"] = osp.join(path, model, nii_data["vol_unsampled"])
+    nii_data["vol"] = osp.join(path, nii_data["vol"])  # save gt
+    nii_data["vol_kspace"] = osp.join(path, nii_data["vol_kspace"])  # compute loss
+    nii_data["mask_3D"] = osp.join(path, nii_data["mask_3D"]) # 
+    nii_data["vol_unsampled"] = osp.join(path, nii_data["vol_unsampled"])
 
     vol_gt = torch.from_numpy(np.load(nii_data["vol"])).float().cuda()
     vol_gt_unsampled = torch.from_numpy(np.load(nii_data["vol_unsampled"])).float().cuda()

@@ -12,6 +12,7 @@
 import os
 import os.path as osp
 import torch
+import logging
 from random import randint
 import sys
 from tqdm import tqdm
@@ -27,9 +28,36 @@ from r2_gaussian.utils.general_utils import safe_state, get_mask
 from r2_gaussian.utils.cfg_utils import load_config
 from r2_gaussian.utils.log_utils import prepare_output_and_logger, setup_experiment_folder
 from r2_gaussian.dataset import Scene
-from r2_gaussian.utils.loss_utils import l1_loss, ssim, tv_3d_loss, L2_loss
+from r2_gaussian.utils.loss_utils import l1_loss, ssim, tv_3d_loss, L2_loss, l1_loss_image
 from r2_gaussian.utils.image_utils import metric_vol, metric_proj
 from r2_gaussian.utils.plot_utils import show_two_slice
+
+
+def install_tqdm_write_logger(log_path="log.txt", level=logging.INFO):
+    """Patch tqdm.write so messages are also appended to a log file."""
+    logger = logging.getLogger("tqdm_write_logger")
+    logger.setLevel(level)
+    logger.propagate = False
+
+    os.makedirs(osp.dirname(log_path) or ".", exist_ok=True)
+
+    if not logger.handlers:
+        handler = logging.FileHandler(log_path, encoding="utf-8")
+        formatter = logging.Formatter("%(asctime)s | %(message)s")
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
+    if getattr(tqdm, "_write_logger_installed", False):
+        return
+
+    original_write = tqdm.write
+
+    def write_and_log(cls, s, file=None, end="\n", nolock=False):
+        original_write(s, file=file, end=end, nolock=nolock)
+        logger.log(level, str(s).rstrip("\n"))
+
+    tqdm.write = classmethod(write_and_log)
+    tqdm._write_logger_installed = True
 
 # 原始数据： k_space (ifft)->  MRI (initialize gs)-> TV loss (query)-> 
 # pred MRI (fft)-> pred kspace -> compute loss
@@ -92,10 +120,6 @@ def training(
         use_tv = opt.lambda_tv > 0
     if use_tv:
         print("Use total variation loss")
-        # tv_vol_size = 32
-        tv_vol_size = opt.tv_vol_size
-        tv_vol_nVoxel = torch.tensor([tv_vol_size, tv_vol_size, tv_vol_size])  # shape = [32*32*32]
-        tv_vol_sVoxel = torch.tensor(nii_cfg["dVoxel"]) * tv_vol_nVoxel
 
     # Train
     iter_start = torch.cuda.Event(enable_timing=True)
@@ -136,32 +160,29 @@ def training(
         loss["total"] += loss["dc_loss"]
 
         # image domain loss
-        
-        # pred_vol_image = torch.fft.fftshift(
-        #     torch.fft.ifftn(torch.fft.ifftshift(pred_vol_kspace * mask), norm='ortho')
-        # )
-        # gt_vol_image = torch.fft.fftshift(
-        #     torch.fft.ifftn(torch.fft.ifftshift(gt_vol_kspace * mask), norm='ortho')
-        # )
 
-        # dc_loss_image = L2_loss(pred_vol_image, gt_vol_image)
+        # IFFT compute pred image and gt image
+        pred_vol_image = torch.fft.fftshift(
+            torch.fft.ifftn(torch.fft.ifftshift(pred_vol_kspace * mask), norm='ortho')
+        )
+        gt_vol_image = torch.fft.fftshift(
+            torch.fft.ifftn(torch.fft.ifftshift(gt_vol_kspace * mask), norm='ortho')
+        )
 
-        # loss["dc_loss_image"] = dc_loss_image
+        dc_loss_image = l1_loss_image(pred_vol_image, gt_vol_image)
+        loss["dc_loss_image"] = dc_loss_image
+        loss["total"] += 0 * loss["dc_loss_image"]
         
-        # loss["total"] += loss["dc_loss_image"]
+        # 2D SSIM on each slice (first dim is depth): [D, H, W] -> [D, 1, H, W]
+        pred_slices_2d = torch.abs(pred_vol_image).unsqueeze(1)
+        gt_slices_2d = torch.abs(gt_vol_image).unsqueeze(1)
+        ssim_loss = 1 - ssim(pred_slices_2d, gt_slices_2d)
+        loss["ssim_loss"] = ssim_loss
+        
+        loss["total"] += opt.lambda_dssim * loss["ssim_loss"]
 
         # 3D TV loss
         if use_tv:
-            # tv_vol_center = (bbox[0] + tv_vol_sVoxel / 2) + (
-            #     bbox[1] - tv_vol_sVoxel - bbox[0]
-            # ) * torch.rand(3)
-            # vol_pred = query(
-            #     gaussians,
-            #     tv_vol_center,
-            #     tv_vol_nVoxel,
-            #     tv_vol_sVoxel,
-            #     pipe,
-            # )["vol"]
             loss_tv = tv_3d_loss(pred_vol, reduction="mean")
             loss["tv"] = loss_tv
             loss["total"] = loss["total"] + opt.lambda_tv * loss_tv
@@ -270,13 +291,13 @@ def training_report(
         vol_pred = queryFunc(scene.gaussians)["vol"]
         vol_gt = scene.vol_gt  # device = cuda
         psnr_3d, _ = metric_vol(vol_gt, vol_pred, "psnr")
-        # ssim_3d, ssim_3d_axis = metric_vol(vol_gt, vol_pred, "ssim")
+        ssim_3d, ssim_3d_axis = metric_vol(vol_gt, vol_pred, "ssim")
         eval_dict = {
             "psnr_3d": psnr_3d,
-            # "ssim_3d": ssim_3d,
-            # "ssim_3d_x": ssim_3d_axis[0],
-            # "ssim_3d_y": ssim_3d_axis[1],
-            # "ssim_3d_z": ssim_3d_axis[2],
+            "ssim_3d": ssim_3d,
+            "ssim_3d_x": ssim_3d_axis[0],
+            "ssim_3d_y": ssim_3d_axis[1],
+            "ssim_3d_z": ssim_3d_axis[2],
         }
         with open(osp.join(eval_save_path, "eval3d.yml"), "w") as f:
             yaml.dump(eval_dict, f, default_flow_style=False, sort_keys=False)
@@ -307,7 +328,7 @@ def training_report(
                 global_step=iteration,
             )
             tb_writer.add_scalar("reconstruction/psnr_3d", psnr_3d, iteration)
-            # tb_writer.add_scalar("reconstruction/ssim_3d", ssim_3d, iteration)
+            tb_writer.add_scalar("reconstruction/ssim_3d", ssim_3d, iteration)
         tqdm.write(
             f"[ITER {iteration}] Evaluating: psnr3d {psnr_3d:.3f}, pts: {scene.gaussians.get_xyz.shape[0]:5d}"
         )
@@ -329,8 +350,8 @@ if __name__ == "__main__":
     op = OptimizationParams(parser)
     pp = PipelineParams(parser)
     parser.add_argument("--detect_anomaly", action="store_true", default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[1, 500, 1000,1500,2000,2500,3000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[1, 500, 1000,1500,2000,2500,3000])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[1,100,200,300,400, 500, 1000,1500,2000,2500,3000,5000,10000,15000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[1,100,200,300,400, 500, 1000,1500,2000,2500,3000,5000,10000,15000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default=None)
@@ -352,7 +373,10 @@ if __name__ == "__main__":
         for key in list(cfg.keys()):
             args_dict[key] = cfg[key]
 
-    args.model_path = setup_experiment_folder(op,lp)
+    args.model_path = setup_experiment_folder(op, lp)
+    # set up log path
+    log_path = osp.join(args.model_path, "log.txt")
+    install_tqdm_write_logger(log_path)
     # Set up logging writer
     # Set up output folder(if None) and return SummaryWriter
     tb_writer = prepare_output_and_logger(args)
@@ -373,3 +397,4 @@ if __name__ == "__main__":
 
     # All done
     print("Training complete.")
+    
