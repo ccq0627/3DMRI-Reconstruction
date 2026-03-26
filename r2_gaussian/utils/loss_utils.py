@@ -34,6 +34,28 @@ def tv_3d_loss(vol, reduction="sum"):
     return tv
 
 
+def gradient(image):
+    dx = image[..., :, 1:] - image[..., :, :-1]
+    dy = image[..., 1:, :] - image[..., :-1, :]
+    return dx, dy
+
+
+def edge_loss_fn(pred_vol_image, gt_vol_image):
+
+    pred = torch.abs(pred_vol_image)
+    gt = torch.abs(gt_vol_image)
+
+    dx_pred, dy_pred = gradient(pred)
+    dx_gt, dy_gt = gradient(gt)
+
+    edge_loss = (
+        torch.mean(torch.abs(dx_pred - dx_gt)) +
+        torch.mean(torch.abs(dy_pred - dy_gt))
+    )
+
+    return edge_loss
+
+
 def l1_loss(network_output, gt):
     return torch.abs((network_output - gt)).mean()
 

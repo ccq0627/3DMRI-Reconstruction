@@ -12,7 +12,6 @@
 import os
 import os.path as osp
 import torch
-import logging
 from random import randint
 import sys
 from tqdm import tqdm
@@ -26,38 +25,13 @@ from r2_gaussian.arguments import ModelParams, OptimizationParams, PipelineParam
 from r2_gaussian.gaussian import GaussianModel, render, query, initialize_gaussian
 from r2_gaussian.utils.general_utils import safe_state, get_mask
 from r2_gaussian.utils.cfg_utils import load_config
-from r2_gaussian.utils.log_utils import prepare_output_and_logger, setup_experiment_folder
+from r2_gaussian.utils.log_utils import prepare_output_and_logger, setup_experiment_folder, prepare_tqdm_write_logger
 from r2_gaussian.dataset import Scene
-from r2_gaussian.utils.loss_utils import l1_loss, ssim, tv_3d_loss, L2_loss, l1_loss_image
+from r2_gaussian.utils.loss_utils import l1_loss, ssim, tv_3d_loss, l1_loss_image, edge_loss_fn
 from r2_gaussian.utils.image_utils import metric_vol, metric_proj
 from r2_gaussian.utils.plot_utils import show_two_slice
+from metric_MRI import evaluate_slices, THRESHOLD
 
-
-def install_tqdm_write_logger(log_path="log.txt", level=logging.INFO):
-    """Patch tqdm.write so messages are also appended to a log file."""
-    logger = logging.getLogger("tqdm_write_logger")
-    logger.setLevel(level)
-    logger.propagate = False
-
-    os.makedirs(osp.dirname(log_path) or ".", exist_ok=True)
-
-    if not logger.handlers:
-        handler = logging.FileHandler(log_path, encoding="utf-8")
-        formatter = logging.Formatter("%(asctime)s | %(message)s")
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-
-    if getattr(tqdm, "_write_logger_installed", False):
-        return
-
-    original_write = tqdm.write
-
-    def write_and_log(cls, s, file=None, end="\n", nolock=False):
-        original_write(s, file=file, end=end, nolock=nolock)
-        logger.log(level, str(s).rstrip("\n"))
-
-    tqdm.write = classmethod(write_and_log)
-    tqdm._write_logger_installed = True
 
 # 原始数据： k_space (ifft)->  MRI (initialize gs)-> TV loss (query)-> 
 # pred MRI (fft)-> pred kspace -> compute loss
@@ -120,6 +94,8 @@ def training(
         use_tv = opt.lambda_tv > 0
     if use_tv:
         print("Use total variation loss")
+    if opt.use_image_loss:
+        print("Use image domain loss")
 
     # Train
     iter_start = torch.cuda.Event(enable_timing=True)
@@ -162,24 +138,30 @@ def training(
         # image domain loss
 
         # IFFT compute pred image and gt image
-        pred_vol_image = torch.fft.fftshift(
-            torch.fft.ifftn(torch.fft.ifftshift(pred_vol_kspace * mask), norm='ortho')
-        )
-        gt_vol_image = torch.fft.fftshift(
-            torch.fft.ifftn(torch.fft.ifftshift(gt_vol_kspace * mask), norm='ortho')
-        )
+        if opt.use_image_loss:
+            pred_vol_image = torch.fft.fftshift(
+                torch.fft.ifftn(torch.fft.ifftshift(pred_vol_kspace * mask), norm='ortho')
+            )
+            gt_vol_image = torch.fft.fftshift(
+                torch.fft.ifftn(torch.fft.ifftshift(gt_vol_kspace * mask), norm='ortho')
+            )
 
-        dc_loss_image = l1_loss_image(pred_vol_image, gt_vol_image)
-        loss["dc_loss_image"] = dc_loss_image
-        loss["total"] += 0 * loss["dc_loss_image"]
-        
-        # 2D SSIM on each slice (first dim is depth): [D, H, W] -> [D, 1, H, W]
-        pred_slices_2d = torch.abs(pred_vol_image).unsqueeze(1)
-        gt_slices_2d = torch.abs(gt_vol_image).unsqueeze(1)
-        ssim_loss = 1 - ssim(pred_slices_2d, gt_slices_2d)
-        loss["ssim_loss"] = ssim_loss
-        
-        loss["total"] += opt.lambda_dssim * loss["ssim_loss"]
+            # dc_loss_image = l1_loss_image(pred_vol_image, gt_vol_image)
+            # loss["dc_loss_image"] = dc_loss_image
+            # loss["total"] += loss["dc_loss_image"]
+            
+            edge_loss = edge_loss_fn(pred_vol_image, gt_vol_image)
+            loss["edge_loss"] = edge_loss
+            loss["total"] += opt.lambda_edge * loss["edge_loss"]
+
+            
+            # 2D SSIM on each slice (first dim is depth): [D, H, W] -> [D, 1, H, W]
+            pred_slices_2d = torch.abs(pred_vol_image).unsqueeze(1)
+            gt_slices_2d = torch.abs(gt_vol_image).unsqueeze(1)
+            ssim_loss = 1 - ssim(pred_slices_2d, gt_slices_2d)
+            loss["ssim_loss"] = ssim_loss
+            
+            loss["total"] += opt.lambda_dssim * loss["ssim_loss"]
 
         # 3D TV loss
         if use_tv:
@@ -225,6 +207,41 @@ def training(
                 tqdm.write(f"[ITER {iteration}] Saving Gaussians")
                 tqdm.write(f"[ITER {iteration}] Computing Loss: {loss['total'].item():.7f}")
                 scene.save(iteration, queryfunc)
+
+            if iteration == opt.iterations:
+                if dataset.eval:
+                    point_cloud_path = osp.join(
+                        scene.model_path, "point_cloud/iteration_{}".format(iteration)
+                    )
+                    vol_gt_path = osp.join(point_cloud_path, "vol_gt.npy")
+                    vol_pred_path = osp.join(point_cloud_path, "vol_pred.npy")
+                    output_path = osp.join(scene.model_path,"eval.yaml")
+                    if osp.exists(vol_gt_path) and osp.exists(vol_pred_path):
+                        vol_gt_eval = torch.from_numpy(np.load(vol_gt_path)).float()
+                        vol_pred_eval = torch.from_numpy(np.load(vol_pred_path)).float()
+                        pixel_max = float(vol_gt_eval.max().item())
+                        eval_result = evaluate_slices(
+                            vol_gt_eval,
+                            vol_pred_eval,
+                            pixel_max=pixel_max,
+                            min_tissue=THRESHOLD,
+                        )
+                        eval_result["gt_path"] = vol_gt_path
+                        eval_result["pred_path"] = vol_pred_path
+                        eval_result["pixel_max"] = pixel_max
+                        with open(output_path, "w", encoding="utf-8") as f:
+                            yaml.safe_dump(
+                                eval_result, f, sort_keys=False, allow_unicode=False
+                            )
+                        tqdm.write(
+                            f"[ITER {iteration}] Saved slice-wise eval to {output_path}. "
+                            f"PSNR={eval_result['mean']['psnr']:.4f}, SSIM={eval_result['mean']['ssim']:.4f}, "
+                            f"valid={eval_result['num_valid_slices']}/{eval_result['num_slices']}"
+                        )
+                    else:
+                        tqdm.write(
+                            f"[ITER {iteration}] Skip slice-wise eval: missing {vol_gt_path} or {vol_pred_path}."
+                        )
 
             # Save checkpoints
             if iteration in checkpoint_iterations:
@@ -376,7 +393,7 @@ if __name__ == "__main__":
     args.model_path = setup_experiment_folder(op, lp)
     # set up log path
     log_path = osp.join(args.model_path, "log.txt")
-    install_tqdm_write_logger(log_path)
+    prepare_tqdm_write_logger(log_path)
     # Set up logging writer
     # Set up output folder(if None) and return SummaryWriter
     tb_writer = prepare_output_and_logger(args)

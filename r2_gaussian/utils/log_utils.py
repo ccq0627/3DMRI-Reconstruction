@@ -7,6 +7,8 @@ import yaml, json
 import os.path as osp
 from datetime import datetime
 from r2_gaussian.arguments import OptimizationParams,ModelParams
+from tqdm import tqdm
+import logging
 
 try:
     from tensorboardX import SummaryWriter
@@ -53,7 +55,7 @@ def prepare_output_and_logger(args):
 
 def setup_experiment_folder(opt: OptimizationParams,lpt: ModelParams, base_dir="MRIdata/outputs"):
     time_str = datetime.now().strftime("%m%d_%H%M")
-    exp_name = f"exp_{time_str}_iter{opt.iterations}_{lpt.accelerate_factor}" 
+    exp_name = f"exp_{time_str}_iter{opt.iterations}_{lpt.accelerate_factor}_{'wi' if opt.use_image_loss else 'woi'}"
     
     exp_dir = osp.join(base_dir, exp_name)
     os.makedirs(exp_dir, exist_ok=True)
@@ -63,3 +65,32 @@ def setup_experiment_folder(opt: OptimizationParams,lpt: ModelParams, base_dir="
         json.dump(vars(opt), f, indent=4)
         
     return exp_dir
+
+
+def prepare_tqdm_write_logger(log_path="log.txt", level=logging.INFO):
+    """Patch tqdm.write so messages are also appended to a log file."""
+    logger = logging.getLogger("tqdm_write_logger")
+    logger.setLevel(level)
+    logger.propagate = False
+
+    os.makedirs(osp.dirname(log_path) or ".", exist_ok=True)
+
+    if not logger.handlers:
+        handler = logging.FileHandler(log_path, encoding="utf-8")
+        formatter = logging.Formatter("%(asctime)s | %(message)s")
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
+    if getattr(tqdm, "_write_logger_installed", False):
+        return
+
+    original_write = tqdm.write
+
+    def write_and_log(cls, s, file=None, end="\n", nolock=False):
+        original_write(s, file=file, end=end, nolock=nolock)
+        logger.log(level, str(s).rstrip("\n"))
+
+    tqdm.write = classmethod(write_and_log)
+    tqdm._write_logger_installed = True
+
+
