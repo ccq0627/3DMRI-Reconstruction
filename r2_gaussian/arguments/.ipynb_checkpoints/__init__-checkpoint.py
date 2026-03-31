@@ -27,7 +27,7 @@ class ModelParams(ParamGroup):
         self.scale_min = 0.0005  # percent of volume size
         self.scale_max = 0.5  # percent of volume size
         self.eval = True
-        self.accelerate_factor = 2
+        self.accelerate_factor = 8
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -58,10 +58,10 @@ class OptimizationParams(ParamGroup):
         self.rotation_lr_init = 0.001
         self.rotation_lr_final = 0.00001
         self.rotation_lr_max_steps = 3_000
-        self.lambda_dssim = 0.2  # ssim loss weight
+        self.lambda_dssim = 1.0  # ssim loss weight
         self.lambda_tv = 1.0  # tv regularization weight
         self.lambda_edge = 0.05  # edge loss weight
-        self.use_image_loss = False
+        self.use_image_loss = True
         self.tv_vol_size = 32
         self.density_min_threshold = 0.0000001
         self.densification_interval = 200

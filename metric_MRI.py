@@ -2,7 +2,7 @@ import argparse
 import os
 import sys
 from typing import Dict, List
-
+import cv2
 import numpy as np
 import torch
 import yaml
@@ -10,8 +10,41 @@ import yaml
 sys.path.append("./")
 from r2_gaussian.utils.image_utils import psnr
 from r2_gaussian.utils.loss_utils import ssim
-
+from lpipsPyTorch import lpips
 THRESHOLD = 0.01  # Minimum mean absolute value of GT slice to consider for evaluation
+
+def get_outer_mask(img: torch.Tensor) -> np.ndarray:
+	img_slice = img.detach().cpu().numpy()
+	img_u8 = np.ascontiguousarray(np.clip(img_slice * 255.0, 0, 255).astype(np.uint8))
+
+	edges = cv2.Canny(img_u8, 50, 150)
+
+	# 2. 形态学闭运算连接边缘
+	kernel = np.ones((5,5), np.uint8)
+	closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+
+	# 3. 膨胀增强连接
+	dilated = cv2.dilate(closed, kernel, iterations=2)
+
+	# 4. 填充轮廓内部
+	contours, hierarchy = cv2.findContours(
+		dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+	)
+
+	# 5. 创建mask并填充
+	mask = np.zeros(img_u8.shape, dtype=np.uint8)
+
+	# 找到最大轮廓
+	if contours:
+		largest_contour = max(contours, key=cv2.contourArea)
+		cv2.drawContours(mask, [largest_contour], -1, 255, -1)
+
+	# 可选：形态学平滑
+	mask = np.ascontiguousarray(cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel))
+	mask = np.ascontiguousarray(cv2.medianBlur(mask, 5))
+	mask01 = mask / 255  # Normalize to [0, 1]
+	return mask01
+
 
 def _load_volume(path: str) -> torch.Tensor:
 	"""Load a 3D volume from .npy or .pt/.pth file into float32 tensor."""
@@ -41,6 +74,7 @@ def evaluate_slices(
 	vol_pred: torch.Tensor,
 	pixel_max: float,
 	min_tissue: float,
+	use_mask: bool = True,
 ) -> Dict:
 	if vol_gt.shape != vol_pred.shape:
 		raise ValueError(
@@ -52,6 +86,7 @@ def evaluate_slices(
 	skipped_slices: List[int] = []
 	psnr_values: List[float] = []
 	ssim_values: List[float] = []
+	lpips_values: List[float] = []
 	pred_max = float(vol_pred.max())
 	if pred_max > 0:
 		vol_pred_eval = vol_pred / pred_max  # Normalize pred to [0, 1] for fair PSNR/SSIM
@@ -67,24 +102,35 @@ def evaluate_slices(
 
 		pred_slice = vol_pred_eval[i]
 
+		if use_mask:
+			mask = get_outer_mask(gt_slice)
+			mask_t = torch.from_numpy(mask).to(device=gt_slice.device, dtype=gt_slice.dtype)
+			gt_slice = gt_slice * mask_t
+			pred_slice = pred_slice * mask_t
+
+
 		gt_4d = gt_slice[None, None]
 		pred_4d = pred_slice[None, None]
 
 		psnr_i = psnr(gt_4d, pred_4d, pixel_max=pixel_max).item()
 		ssim_i = ssim(gt_4d, pred_4d).item()
+		lpips_i = lpips(gt_4d, pred_4d, net_type='vgg').item()
 
 		per_slice.append(
 			{
 				"slice_index": int(i),
 				"psnr": float(psnr_i),
 				"ssim": float(ssim_i),
+				"lpips": float(lpips_i),
 			}
 		)
 		psnr_values.append(float(psnr_i))
 		ssim_values.append(float(ssim_i))
-
+		lpips_values.append(float(lpips_i))
+		
 	mean_psnr = float(np.mean(psnr_values)) if psnr_values else 0.0
 	mean_ssim = float(np.mean(ssim_values)) if ssim_values else 0.0
+	mean_lpips = float(np.mean(lpips_values)) if lpips_values else 0.0
 
 	return {
 		"num_slices": int(n_slices),
@@ -96,6 +142,7 @@ def evaluate_slices(
 		"mean": {
 			"psnr": mean_psnr,
 			"ssim": mean_ssim,
+			"lpips": mean_lpips,
 		},
 	}
 
@@ -125,10 +172,21 @@ def main() -> None:
 		default=THRESHOLD,
 		help="Skip slice if mean(abs(gt_slice)) < this value.",
 	)
+	parser.add_argument("--use_mask", action="store_true", default=True, help="Whether to apply a mask to the slices before evaluation.")
+	parser.add_argument(
+		"--device",
+		type=str,
+		default="cpu",
+		help="Device to use for evaluation.",
+	)
 	args = parser.parse_args()
 
-	vol_gt = _load_volume(args.gt)
-	vol_pred = _load_volume(args.pred)
+	if args.device == "cuda" and torch.cuda.is_available():
+		vol_gt = _load_volume(args.gt).cuda()
+		vol_pred = _load_volume(args.pred).cuda()
+	else:
+		vol_gt = _load_volume(args.gt)
+		vol_pred = _load_volume(args.pred)
 
 	pixel_max = args.pixel_max if args.pixel_max is not None else float(vol_gt.max())
 	if pixel_max <= 0:
@@ -139,6 +197,7 @@ def main() -> None:
 		vol_pred,
 		pixel_max=pixel_max,
 		min_tissue=args.min_tissue,
+		use_mask=args.use_mask,
 	)
 	result["gt_path"] = args.gt
 	result["pred_path"] = args.pred
