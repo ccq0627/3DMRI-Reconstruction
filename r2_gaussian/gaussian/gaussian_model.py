@@ -10,6 +10,7 @@
 #
 import os
 import sys
+import math
 import torch
 from torch import nn
 import numpy as np
@@ -69,8 +70,6 @@ class GaussianModel:
         self._scaling = torch.empty(0)  # 3d scale
         self._rotation = torch.empty(0)  # rotation expressed in quaternions
         self._density = torch.empty(0)  # density
-        self.max_radii2D = torch.empty(0)
-        self.max_radii3D = torch.empty(0)
         self.xyz_gradient_accum = torch.empty(0)
         self.denom = torch.empty(0)
         self.optimizer = None
@@ -84,8 +83,6 @@ class GaussianModel:
             self._scaling,
             self._rotation,
             self._density,
-            self.max_radii2D,
-            self.max_radii3D,
             self.xyz_gradient_accum,
             self.denom,
             self.optimizer.state_dict(),
@@ -99,8 +96,6 @@ class GaussianModel:
             self._scaling,
             self._rotation,
             self._density,
-            self.max_radii2D,
-            self.max_radii3D,
             xyz_gradient_accum,
             denom,
             opt_dict,
@@ -142,7 +137,7 @@ class GaussianModel:
             "Initialize gaussians from {} estimated points".format(
                 fused_point_cloud.shape[0]
             )
-        )
+        )  #[n, 3]
         fused_density = (
             self.density_inverse_activation(torch.tensor(density)).float().cuda()
         )
@@ -151,7 +146,7 @@ class GaussianModel:
                 distCUDA2(fused_point_cloud),
                 0.001**2,
             )
-        )
+        )  # [n,]
         if self.scale_bound is not None:
             dist = torch.clamp(
                 dist, self.scale_bound[0] + EPS, self.scale_bound[1] - EPS
@@ -165,12 +160,10 @@ class GaussianModel:
         self._scaling = nn.Parameter(scales.requires_grad_(True))
         self._rotation = nn.Parameter(rots.requires_grad_(True))
         self._density = nn.Parameter(fused_density.requires_grad_(True))
-        self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
-        self.max_radii3D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
         #! Generate one gaussian for debugging purpose
         if False:
-            print("Initialize one gaussian")
+            print("Initialize one gaussian for debug.")
             fused_xyz = (
                 torch.tensor([[0.0, 0.0, 0.0]]).float().cuda()
             )  # position: [0,0,0]
@@ -188,7 +181,6 @@ class GaussianModel:
             self._scaling = nn.Parameter(scales.requires_grad_(True))
             self._rotation = nn.Parameter(rots.requires_grad_(True))
             self._density = nn.Parameter(fused_density.requires_grad_(True))
-            self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
     def training_setup(self, training_args):
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
@@ -372,8 +364,6 @@ class GaussianModel:
         self.xyz_gradient_accum = self.xyz_gradient_accum[valid_points_mask]
 
         self.denom = self.denom[valid_points_mask]
-        self.max_radii2D = self.max_radii2D[valid_points_mask]
-        self.max_radii3D = self.max_radii3D[valid_points_mask]
 
     def cat_tensors_to_optimizer(self, tensors_dict):
         optimizable_tensors = {}
@@ -415,8 +405,6 @@ class GaussianModel:
         new_densities,
         new_scaling,
         new_rotation,
-        new_max_radii2D,
-        new_max_radii3D,
     ):
         d = {
             "xyz": new_xyz,
@@ -433,8 +421,6 @@ class GaussianModel:
 
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
-        self.max_radii2D = torch.cat([self.max_radii2D, new_max_radii2D], dim=-1)
-        self.max_radii3D = torch.cat([self.max_radii3D, new_max_radii3D], dim=-1)
 
     def densify_and_split(self, grads, grad_threshold, densify_scale_threshold, N=2):
         n_init_points = self.get_xyz.shape[0]
@@ -449,11 +435,11 @@ class GaussianModel:
 
         stds = self.get_scaling[selected_pts_mask].repeat(N, 1)
         means = torch.zeros((stds.size(0), 3), device="cuda")
-        samples = torch.normal(mean=means, std=stds)
-        rots = build_rotation(self._rotation[selected_pts_mask]).repeat(N, 1, 1)
+        samples = torch.normal(mean=means, std=stds)   # model coordinate 
+        rots = build_rotation(self._rotation[selected_pts_mask]).repeat(N, 1, 1)   # compute model to world rotation matrix 
         new_xyz = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_xyz[
             selected_pts_mask
-        ].repeat(N, 1)
+        ].repeat(N, 1)  # rots: [n, 3, 3]  samples: [n, 3]  -> [n, 3, 1] -> squeeze(-1) -> [n, 3]
         new_scaling = self.scaling_inverse_activation(
             self.get_scaling[selected_pts_mask].repeat(N, 1) / (0.8 * N)
         )
@@ -462,16 +448,12 @@ class GaussianModel:
         new_density = self.density_inverse_activation(
             self.get_density[selected_pts_mask].repeat(N, 1) * (1 / N)
         )
-        new_max_radii2D = self.max_radii2D[selected_pts_mask].repeat(N)
-        new_max_radii3D = self.max_radii3D[selected_pts_mask].repeat(N)
 
         self.densification_postfix(
             new_xyz,
             new_density,
             new_scaling,
             new_rotation,
-            new_max_radii2D,
-            new_max_radii3D,
         )
 
         prune_filter = torch.cat(
@@ -499,8 +481,6 @@ class GaussianModel:
         )
         new_scaling = self._scaling[selected_pts_mask]
         new_rotation = self._rotation[selected_pts_mask]
-        new_max_radii2D = self.max_radii2D[selected_pts_mask]
-        new_max_radii3D = self.max_radii3D[selected_pts_mask]
 
         self._density[selected_pts_mask] = new_densities
 
@@ -509,8 +489,6 @@ class GaussianModel:
             new_densities,
             new_scaling,
             new_rotation,
-            new_max_radii2D,
-            new_max_radii3D,
         )
 
     def split_for_bigGS(self, densify_scale_threshold, N=2):
@@ -537,16 +515,12 @@ class GaussianModel:
         new_density = self.density_inverse_activation(
             self.get_density[selected_pts_mask].repeat(N, 1) * (1 / N)
         )
-        new_max_radii2D = self.max_radii2D[selected_pts_mask].repeat(N)
-        new_max_radii3D = self.max_radii3D[selected_pts_mask].repeat(N)
 
         self.densification_postfix(
             new_xyz,
             new_density,
             new_scaling,
             new_rotation,
-            new_max_radii2D,
-            new_max_radii3D,
         )
 
         prune_filter = torch.cat(
@@ -557,30 +531,84 @@ class GaussianModel:
         )
         self.prune_points(prune_filter)
 
+    def long_axis_split(self, grads, grad_threshold, split_distance, density_reduction_factor):
+        # grads: shape [n, 1], torch.norm(grads, dim=-1)起到降维作用
+        selected_pts_mask = torch.where(torch.norm(grads, dim=-1) >= grad_threshold, True, False)
+
+        stds = self.get_scaling[selected_pts_mask]
+
+        max_values, max_indices = torch.max(stds, dim=-1, keepdim=True)  # 确保维度匹配 [n, 1]
+
+        mask = torch.zeros_like(stds, dtype=bool).scatter_(dim=1, index=max_indices, value=True)
+
+        max_radiis = max_values * mask * 3.0  # 计算高斯长轴的半径3σ
+
+        reduction = density_reduction_factor  # 0.6
+        rate = split_distance  # 0.45
+        x1 = max_radiis * rate  # 计算子高斯距离中心的距离
+
+        rate_w = 1 - rate   # 计算子高斯半径比例
+
+        rate_h = math.sqrt(1 - rate_w ** 2)  # 计算子高斯长轴比例
+
+        x1 = torch.cat([x1, -x1], dim=0)  # [2n, 3]
+        # rots: [2n, 3, 3] 旋转矩阵，表示高斯的方向
+        rots = build_rotation(self._rotation[selected_pts_mask]).repeat(2, 1, 1) 
+        new_xyz = torch.bmm(rots, x1.unsqueeze(-1)).squeeze(-1) + self.get_xyz[selected_pts_mask].repeat(2, 1)  # [2n, 3]
+
+        new_scaling = self.scaling_inverse_activation(stds.scatter_(1, max_indices, max_values * rate_w / rate_h).repeat(2, 1) * rate_h)  # 调整子高斯的长轴
+
+        new_rotation = self._rotation[selected_pts_mask].repeat(2, 1)
+
+        new_density = self.density_inverse_activation(self.get_density[selected_pts_mask].repeat(2, 1) * reduction)
+
+        self.densification_postfix(
+            new_xyz,
+            new_density,
+            new_scaling,
+            new_rotation,
+        )
+
+        
+        prune_filter = torch.cat(
+            (
+                selected_pts_mask,
+                torch.zeros(2 * selected_pts_mask.sum(), device="cuda", dtype=bool)
+            )
+        )
+
+        self.prune_points(prune_filter)
+
+
     def densify_and_prune(
         self,
-        max_grad,
-        min_density,
+        max_grad,  # densify_grad_threshold
+        min_density,  # density_min_threshold
         max_scale,
         max_num_gaussians,
         densify_scale_threshold,
         bbox=None,
+        use_las = False,
     ):
-        grads = self.xyz_gradient_accum / self.denom
+        grads = self.xyz_gradient_accum    # xyz_gradient_accum: e-07数量级  [n, 1]
         grads[grads.isnan()] = 0.0
 
         # Densify Gaussians if Gaussians are fewer than threshold
         if densify_scale_threshold:
             if not max_num_gaussians or (
-                max_num_gaussians and grads.shape[0] < max_num_gaussians
+                max_num_gaussians and self.get_xyz.shape[0] < max_num_gaussians
             ):
-                self.densify_and_clone(grads, max_grad, densify_scale_threshold)
-                self.densify_and_split(grads, max_grad, densify_scale_threshold)
+                if use_las:
+                    selected_pts_num = torch.where(torch.norm(grads, dim=-1) >= max_grad, True, False).sum()
+                    if selected_pts_num > 0:
+                        self.long_axis_split(grads, max_grad, 0.45, 0.6)
+                else:
+                    self.densify_and_clone(grads, max_grad, densify_scale_threshold)
+                    self.densify_and_split(grads, max_grad, densify_scale_threshold)
 
         # Prune gaussians with too small density
         # 密度太小的高斯不参与贡献
         prune_mask = (self.get_density < min_density).squeeze()
-        # prune_mask = torch.zeros_like(self.get_density, dtype=bool).squeeze()
         # # Prune gaussians outside the bbox
         if bbox is not None:
             xyz = self.get_xyz
@@ -595,27 +623,21 @@ class GaussianModel:
 
             prune_mask = prune_mask | prune_mask_xyz
 
-        # if max_scale:
-        #     big_points_ws = self.get_scaling.max(dim=1).values > max_scale
-        #     prune_mask = torch.logical_or(prune_mask, big_points_ws)
-        # split for big gs
         if max_scale:
-            self.split_for_bigGS(max_scale)
+            big_points_ws = self.get_scaling.max(dim=1).values > max_scale
+            prune_mask = torch.logical_or(prune_mask, big_points_ws)
+        # split for big gs
+        # if max_scale:
+        #     self.split_for_bigGS(max_scale)
         
-        # self.prune_points(prune_mask)
+        self.prune_points(prune_mask)
 
         torch.cuda.empty_cache()
 
         return grads
 
-    # def add_densification_stats(self, viewspace_point_tensor, update_filter):
-    #     self.xyz_gradient_accum[update_filter] += torch.norm(
-    #         viewspace_point_tensor.grad[update_filter, :2], dim=-1, keepdim=True
-    #     )
-    #     self.denom[update_filter] += 1
-
     def add_densification_stats(self):
         self.xyz_gradient_accum += torch.norm(
             self._xyz.grad, dim=-1, keepdim=True
-        )
+        )  # [n, 1]
         self.denom += 1

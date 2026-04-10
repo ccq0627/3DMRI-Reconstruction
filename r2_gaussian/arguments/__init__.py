@@ -26,7 +26,7 @@ class ModelParams(ParamGroup):
         self.ply_path = ""  # Path to initialization point cloud (if None, we will try to find `init_*.npy`.)
         self.scale_min = 0.0005  # percent of volume size
         self.scale_max = 0.5  # percent of volume size
-        self.eval = True
+        self.eval = False
         self.accelerate_factor = 2
         super().__init__(parser, "Loading Parameters", sentinel)
 
@@ -61,15 +61,16 @@ class OptimizationParams(ParamGroup):
         self.lambda_dssim = 0.2  # ssim loss weight
         self.lambda_tv = 1.0  # tv regularization weight
         self.lambda_edge = 0.05  # edge loss weight
-        self.use_image_loss = False
+        self.use_image_loss = True
+        self.use_las = True  # long axis split
         self.tv_vol_size = 32
         self.density_min_threshold = 0.0000001
         self.densification_interval = 200
         self.densify_from_iter = 500
         self.densify_until_iter = 3_000
-        self.densify_grad_threshold = 5.0e-08
+        self.densify_grad_threshold = 5.0e-06
         self.densify_scale_threshold = 0.001  # percent of volume size
-        self.max_scale = 0.001  # percent of volume size
+        self.max_scale = None  # percent of volume size
         self.max_num_gaussians = 500_000
         super().__init__(parser, "Optimization Parameters")
 

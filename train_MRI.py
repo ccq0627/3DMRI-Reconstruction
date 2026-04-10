@@ -81,8 +81,7 @@ def training(
     gaussians = GaussianModel(scale_bound)
     initialize_gaussian(gaussians, dataset, None)
     scene.gaussians = gaussians
-    gaussians.training_setup(opt)
-
+    gaussians.training_setup(opt)  # Set up optimizer and scheduler
     if checkpoint is not None:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
@@ -175,23 +174,37 @@ def training(
         torch.cuda.synchronize()
 
         with torch.no_grad():
-            """wait to writting"""
             # Adaptive control
-            gaussians.add_densification_stats()
             if iteration < opt.densify_until_iter:
+                gaussians.add_densification_stats()
                 if (
                     iteration > opt.densify_from_iter
                     and iteration % opt.densification_interval == 0
                 ):
                     gaussians.densify_and_prune(
-                        opt.densify_grad_threshold,
-                        opt.density_min_threshold,
+                        opt.densify_grad_threshold,  # 决定是否致密化
+                        opt.density_min_threshold,  # Prune贡献小的高斯
                         max_scale,
                         opt.max_num_gaussians,
-                        densify_scale_threshold, # 0.2
+                        densify_scale_threshold, # 0.2， 决定克隆还是分裂
                         bbox,
+                        opt.use_las,
                     )
-            
+            if False:
+                print("======================================================================")
+                print(f"[ITER {iteration}] Number of Gaussians: {gaussians.get_xyz.shape[0]}")
+                print(f"[ITER {iteration}] Loss: {loss['total'].item():.7f}, DC Loss: {loss['dc_loss'].item():.7f}")
+                print(f"[ITER {iteration}] Gaussians xyz: {gaussians.get_xyz}")
+                print(f"[ITER {iteration}] Gaussians xyz grad: {gaussians._xyz.grad}")
+                
+                print(f"[ITER {iteration}] Gaussians density: {gaussians.get_density}")
+                print(f"[ITER {iteration}] Gaussians original density: {gaussians._density}")
+                print(f"[ITER {iteration}] Gaussians density grad: {gaussians._density.grad}")
+                
+                print(f"[ITER {iteration}] Gaussians scale: {gaussians.get_scaling}")
+                print(f"[ITER {iteration}] Gaussians original scale: {gaussians._scaling}")
+                print(f"[ITER {iteration}] Gaussians scale grad: {gaussians._scaling.grad}")
+
             if gaussians.get_density.shape[0] == 0:
                 raise ValueError(
                     "No Gaussian left. Change adaptive control hyperparameters!"
@@ -208,6 +221,7 @@ def training(
                 tqdm.write(f"[ITER {iteration}] Computing Loss: {loss['total'].item():.7f}")
                 scene.save(iteration, queryfunc)
 
+            # Metrics
             if iteration == opt.iterations:
                 if dataset.eval:
                     point_cloud_path = osp.join(
@@ -270,10 +284,7 @@ def training(
             for param_group in gaussians.optimizer.param_groups:
                 metrics[f"lr_{param_group['name']}"] = param_group["lr"]
             training_report(
-                tb_writer,
                 iteration,
-                metrics,
-                iter_start.elapsed_time(iter_end),
                 testing_iterations,
                 scene,
                 queryfunc,
@@ -281,28 +292,17 @@ def training(
 
 
 def training_report(
-    tb_writer,
     iteration,
-    metrics_train,
-    elapsed,
     testing_iterations,
     scene: Scene,
     queryFunc,
 ):
     # Add training statistics
-    if tb_writer:
-        for key in list(metrics_train.keys()):
-            tb_writer.add_scalar(f"train/{key}", metrics_train[key], iteration)
-        tb_writer.add_scalar("train/iter_time", elapsed, iteration)
-        tb_writer.add_scalar(
-            "train/total_points", scene.gaussians.get_xyz.shape[0], iteration
-        )
 
     if iteration in testing_iterations:
         eval_save_path = osp.join(scene.model_path, "eval", f"iter_{iteration:06d}")
         os.makedirs(eval_save_path, exist_ok=True)
         torch.cuda.empty_cache()
-
 
         # Evaluate 3D reconstruction performance
         vol_pred = queryFunc(scene.gaussians)["vol"]
@@ -319,42 +319,9 @@ def training_report(
         with open(osp.join(eval_save_path, "eval3d.yml"), "w") as f:
             yaml.dump(eval_dict, f, default_flow_style=False, sort_keys=False)
 
-        # if iteration == testing_iterations[-1]:
-
-        # tv_writer = None (default)
-        if tb_writer:
-            image_show_3d = np.concatenate(
-                [
-                    show_two_slice(
-                        vol_gt[..., i],
-                        vol_pred[..., i],
-                        f"slice {i} gt",
-                        f"slice {i} pred",
-                        vmin=vol_gt[..., i].min(),
-                        vmax=vol_gt[..., i].max(),
-                        save=True,
-                    )
-                    for i in np.linspace(0, vol_gt.shape[2], 7).astype(int)[1:-1]
-                ],
-                axis=0,
-            )
-            image_show_3d = torch.from_numpy(image_show_3d)[None].permute([0, 3, 1, 2])
-            tb_writer.add_images(
-                "reconstruction/slice-gt_pred_diff",
-                image_show_3d,
-                global_step=iteration,
-            )
-            tb_writer.add_scalar("reconstruction/psnr_3d", psnr_3d, iteration)
-            tb_writer.add_scalar("reconstruction/ssim_3d", ssim_3d, iteration)
         tqdm.write(
-            f"[ITER {iteration}] Evaluating: psnr3d {psnr_3d:.3f}, pts: {scene.gaussians.get_xyz.shape[0]:5d}"
+            f"[ITER {iteration}] Evaluating: psnr3d {psnr_3d:.3f}, ssim3d {ssim_3d:.3f}, pts: {scene.gaussians.get_xyz.shape[0]:5d}"
         )
-
-        # Record other metrics
-        if tb_writer:
-            tb_writer.add_histogram(
-                "scene/density_histogram", scene.gaussians.get_density, iteration
-            )
 
     torch.cuda.empty_cache()
 
@@ -390,7 +357,7 @@ if __name__ == "__main__":
         for key in list(cfg.keys()):
             args_dict[key] = cfg[key]
 
-    args.model_path = setup_experiment_folder(op, lp)
+    args.model_path = setup_experiment_folder(args)
     # set up log path
     log_path = osp.join(args.model_path, "log.txt")
     prepare_tqdm_write_logger(log_path)

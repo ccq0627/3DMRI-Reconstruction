@@ -53,16 +53,16 @@ def prepare_output_and_logger(args):
     return tb_writer
 
 
-def setup_experiment_folder(opt: OptimizationParams,lpt: ModelParams, base_dir="MRIdata/outputs"):
-    time_str = datetime.now().strftime("%m%d_%H%M")
-    exp_name = f"exp_{time_str}_iter{opt.iterations}_{lpt.accelerate_factor}_{'wi' if opt.use_image_loss else 'woi'}"
-    
+def setup_experiment_folder(args, base_dir="MRIdata/outputs"):
+    time_str = datetime.now().strftime("%m-%d_%H-%M")
+    exp_name = f"exp_{time_str}_iter{args.iterations}_{args.accelerate_factor}_{'wi' if args.use_image_loss else 'woi'}"
+
     exp_dir = osp.join(base_dir, exp_name)
     os.makedirs(exp_dir, exist_ok=True)
     
     config_path = osp.join(exp_dir, "exp_config.json")
     with open(config_path, 'w', encoding='utf-8') as f:
-        json.dump(vars(opt), f, indent=4)
+        json.dump(vars(args), f, indent=4)
         
     return exp_dir
 
