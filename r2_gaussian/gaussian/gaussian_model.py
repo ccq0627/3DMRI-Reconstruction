@@ -641,3 +641,33 @@ class GaussianModel:
             self._xyz.grad, dim=-1, keepdim=True
         )  # [n, 1]
         self.denom += 1
+
+    def prune_points_periodic(self, min_density, max_scale, bbox=None) -> None:
+        prune_mask = (self.get_density < min_density).squeeze()
+        # # Prune gaussians outside the bbox
+        if bbox is not None:
+            xyz = self.get_xyz
+            prune_mask_xyz = (
+                (xyz[:, 0] < bbox[0, 0])
+                | (xyz[:, 0] > bbox[1, 0])
+                | (xyz[:, 1] < bbox[0, 1])
+                | (xyz[:, 1] > bbox[1, 1])
+                | (xyz[:, 2] < bbox[0, 2])
+                | (xyz[:, 2] > bbox[1, 2])
+            )
+
+            prune_mask = prune_mask | prune_mask_xyz
+
+        if max_scale:
+            big_points_ws = self.get_scaling.max(dim=1).values > max_scale
+            prune_mask = torch.logical_or(prune_mask, big_points_ws)
+        # split for big gs
+        # if max_scale:
+        #     self.split_for_bigGS(max_scale)
+        
+        self.prune_points(prune_mask)
+
+        torch.cuda.empty_cache()
+
+    
+

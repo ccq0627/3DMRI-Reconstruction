@@ -31,7 +31,7 @@ class Scene:
         args: ModelParams,
     ):
         self.model_path = args.model_path
-        args.source_path = osp.join(args.source_path, f"acc_rate{args.accelerate_factor}") 
+        args.source_path = osp.join(args.source_path, f"acc_rate{args.accelerate_factor}_sigma{args.mask_sigma}") 
         # don't need camera
         # self.train_cameras = {}
         # self.test_cameras = {}

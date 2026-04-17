@@ -14,7 +14,7 @@ import sys
 from datetime import datetime
 import numpy as np
 import random
-
+from torch import Tensor
 
 def t2a(tensor):
     if torch.is_tensor(tensor):
@@ -31,7 +31,7 @@ def PILtoTorch(pil_image, resolution):
     else:
         return resized_image.unsqueeze(dim=-1).permute(2, 0, 1)
 
-def get_mask(size, per: float):
+def get_mask(size, per: float, sigma: int):
     np.random.seed(0)
     Nx, Ny, Nz = size[0], size[1], size[2]
     total_lines = int(per * (Ny * Nz))
@@ -42,7 +42,6 @@ def get_mask(size, per: float):
     r = np.sqrt(ky**2 + kz**2)
 
     # define gaussian distribution
-    sigma = 100 
     probability_map = np.exp(-0.5 * (r**2) / (sigma**2))
 
     # set up full sample area
@@ -73,7 +72,15 @@ def get_mask(size, per: float):
 
     return mask_3d
 
+def fft(vol_3D: Tensor) -> Tensor:
+    return torch.fft.fftshift(
+        torch.fft.fftn(torch.fft.ifftshift(vol_3D), norm='ortho')
+    )
 
+def ifft(kspace_3D: Tensor) -> Tensor:
+    return torch.fft.fftshift(
+        torch.fft.ifftn(torch.fft.ifftshift(kspace_3D), norm='ortho')
+    )
 
 def safe_state(silent):
     old_f = sys.stdout

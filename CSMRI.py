@@ -5,7 +5,7 @@ import os.path as osp
 import os
 
 from time import time
-
+from datetime import datetime
 
 # image -> kspace
 def fft(x: np.ndarray) -> np.ndarray:
@@ -64,7 +64,7 @@ def cs_mri_3d_recon(
         diff = np.linalg.norm(x - prev_x) / (np.linalg.norm(prev_x) + 1e-8)
         if verbose:
             if (i + 1) % 50 == 0 :
-                print(f"Iteration {i+1}, Relative Change: {diff:.6f}")
+                print(f"Iteration {i+1}, Relative Change: {diff:.6f} [{datetime.now().strftime('%m-%d %H:%M')}]")
         
         if diff < tol:
             break
@@ -77,7 +77,7 @@ kspace = np.load("MRIdata/acc_rate2/kspace_gt.npy")
 mask = np.load("MRIdata/acc_rate2/mask_3D.npy")
 
 start_time = time()
-
+print(f"starting CS-MRI reconstruction. {datetime.now().strftime('%m-%d %H:%M')}")
 recon = cs_mri_3d_recon(kspace, mask)
 
 end_time = time()

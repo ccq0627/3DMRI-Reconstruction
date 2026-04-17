@@ -53,9 +53,9 @@ def prepare_output_and_logger(args):
     return tb_writer
 
 
-def setup_experiment_folder(args, base_dir="MRIdata/outputs"):
+def setup_experiment_folder(args: Namespace, base_dir="MRIdata/outputs"):
     time_str = datetime.now().strftime("%m-%d_%H-%M")
-    exp_name = f"exp_{time_str}_iter{args.iterations}_{args.accelerate_factor}_{'wi' if args.use_image_loss else 'woi'}"
+    exp_name = f"exp_{time_str}_iter{args.iterations}_{args.accelerate_factor}_{'wi' if args.use_image_loss else 'woi'}_sigma{args.mask_sigma}"
 
     exp_dir = osp.join(base_dir, exp_name)
     os.makedirs(exp_dir, exist_ok=True)

@@ -22,12 +22,12 @@ import torch.nn.functional as F
 
 sys.path.append("./")
 from r2_gaussian.arguments import ModelParams, OptimizationParams, PipelineParams
-from r2_gaussian.gaussian import GaussianModel, render, query, initialize_gaussian
-from r2_gaussian.utils.general_utils import safe_state, get_mask
+from r2_gaussian.gaussian import GaussianModel, render, query, initialize_gaussian, slice_rasterize
+from r2_gaussian.utils.general_utils import safe_state, get_mask, fft, ifft
 from r2_gaussian.utils.cfg_utils import load_config
 from r2_gaussian.utils.log_utils import prepare_output_and_logger, setup_experiment_folder, prepare_tqdm_write_logger
 from r2_gaussian.dataset import Scene
-from r2_gaussian.utils.loss_utils import l1_loss, ssim, tv_3d_loss, l1_loss_image, edge_loss_fn
+from r2_gaussian.utils.loss_utils import l1_loss, ssim, tv_3d_loss, edge_loss_fn
 from r2_gaussian.utils.image_utils import metric_vol, metric_proj
 from r2_gaussian.utils.plot_utils import show_two_slice
 from metric_MRI import evaluate_slices, THRESHOLD
@@ -50,14 +50,20 @@ def training(
     # Set up dataset
     scene = Scene(dataset)
     gt_vol_kspace = scene.vol_gt_kspace  # device = cuda  欠采样点的kspace
-    mask = scene.mask
+    mask: torch.Tensor = scene.mask
+
+    gt_vol_image = ifft(gt_vol_kspace * mask)
+    gt_vol_kspace_1 = fft(gt_vol_image)
+    gt_vol_image_1 = ifft(gt_vol_kspace_1 * mask)
+    gt_vol_kspace_2 = fft(gt_vol_image_1)
+    gt_vol_image_2 = ifft(gt_vol_kspace_2 * mask)
+
 
     # Set up some parameters
     nii_cfg = scene.nii_cfg
     bbox = scene.bbox
     volume_to_world = max(nii_cfg["sVoxel"])
-    # opt.max_scale = 0.15 (dafult)
-    # max_scale = 0.3
+    # opt.max_scale = None (dafult)
     max_scale = opt.max_scale * volume_to_world if opt.max_scale else None
     # opt.densify_scale_threshold = 0.1 (percent of volume size)
     densify_scale_threshold = (
@@ -92,9 +98,11 @@ def training(
     if opt.lambda_tv is not None:
         use_tv = opt.lambda_tv > 0
     if use_tv:
-        print("Use total variation loss")
+        print("Use total variation loss.")
     if opt.use_image_loss:
-        print("Use image domain loss")
+        print("Use image domain loss.")
+        if opt.multi_stage_loss:
+            print("Use multi-stage loss.")
 
     # Train
     iter_start = torch.cuda.Event(enable_timing=True)
@@ -118,49 +126,77 @@ def training(
             pred_vol_complex = torch.complex(pred_vol, torch.zeros_like(pred_vol))
         else:
             pred_vol_complex = pred_vol
-        pred_vol_kspace = torch.fft.fftshift(
-            torch.fft.fftn(torch.fft.ifftshift(pred_vol_complex), norm='ortho')
-        )
-        
+
+        ## get pred kspace
+        pred_vol_kspace = fft(pred_vol_complex)
+
         # # Compute loss
         # 直接使用体积compute loss
         loss = {"total": 0.0}
-        pred_sampled = pred_vol_kspace[mask.bool()]
-        gt_sampled = gt_vol_kspace[mask.bool()] # gt_vol_kspace 必须只有实测的那些点有值
-        
-        dc_loss = l1_loss(pred_sampled, gt_sampled)
 
+        ## kspace data consistency 
+        dc_loss = l1_loss(pred_vol_kspace[mask.bool()], gt_vol_kspace[mask.bool()])
         loss["dc_loss"] = dc_loss
-        
         loss["total"] += loss["dc_loss"]
 
         # image domain loss
-
-        # IFFT compute pred image and gt image
+        # use IFFT compute pred image and gt image
         if opt.use_image_loss:
-            pred_vol_image = torch.fft.fftshift(
-                torch.fft.ifftn(torch.fft.ifftshift(pred_vol_kspace * mask), norm='ortho')
-            )
-            gt_vol_image = torch.fft.fftshift(
-                torch.fft.ifftn(torch.fft.ifftshift(gt_vol_kspace * mask), norm='ortho')
-            )
+            pred_vol_image = ifft(pred_vol_kspace * mask)  # complex tensor
 
-            # dc_loss_image = l1_loss_image(pred_vol_image, gt_vol_image)
-            # loss["dc_loss_image"] = dc_loss_image
-            # loss["total"] += loss["dc_loss_image"]
-            
             edge_loss = edge_loss_fn(pred_vol_image, gt_vol_image)
             loss["edge_loss"] = edge_loss
             loss["total"] += opt.lambda_edge * loss["edge_loss"]
 
-            
             # 2D SSIM on each slice (first dim is depth): [D, H, W] -> [D, 1, H, W]
             pred_slices_2d = torch.abs(pred_vol_image).unsqueeze(1)
             gt_slices_2d = torch.abs(gt_vol_image).unsqueeze(1)
             ssim_loss = 1 - ssim(pred_slices_2d, gt_slices_2d)
             loss["ssim_loss"] = ssim_loss
-            
             loss["total"] += opt.lambda_dssim * loss["ssim_loss"]
+
+
+            # 2026/4/41 add mutil stage fre and image loss
+            # one stage
+            if opt.multi_stage_loss:
+
+                pred_vol_kspace_1 = fft(pred_vol_image)
+                
+                dc_loss_1 = l1_loss(pred_vol_kspace_1[mask.bool()], gt_vol_kspace_1[mask.bool()])
+                loss["dc_loss_1"] = dc_loss_1
+                loss["total"] += 2.5*loss["dc_loss_1"]
+
+                pred_vol_image_1 = ifft(pred_vol_kspace_1 * mask)
+                
+                edge_loss_1 = edge_loss_fn(pred_vol_image_1, gt_vol_image_1)
+                loss["edge_loss_1"] = edge_loss_1
+                loss["total"] += 2.5*opt.lambda_edge * loss["edge_loss_1"]
+
+                pred_slices_2d_1 = torch.abs(pred_vol_image_1).unsqueeze(1)
+                gt_slices_2d_1 = torch.abs(gt_vol_image_1).unsqueeze(1)
+                ssim_loss_1 = 1 - ssim(pred_slices_2d_1, gt_slices_2d_1)
+                loss["ssim_loss_1"] = ssim_loss_1
+                loss["total"] += 2.5*opt.lambda_dssim * loss["ssim_loss_1"]
+
+                # two stage
+                pred_vol_kspace_2 = fft(pred_vol_image_1)
+                
+                dc_loss_2 = l1_loss(pred_vol_kspace_2[mask.bool()] , gt_vol_kspace_2[mask.bool()] )
+                loss["dc_loss_2"] = dc_loss_2
+                loss["total"] += 2.5*loss["dc_loss_2"]
+
+                pred_vol_image_2 = ifft(pred_vol_kspace_2 * mask)
+                
+
+                edge_loss_2 = edge_loss_fn(pred_vol_image_2, gt_vol_image_2)
+                loss["edge_loss_2"] = edge_loss_2
+                loss["total"] += 2.5*opt.lambda_edge * loss["edge_loss_2"]
+
+                pred_slices_2d_2 = torch.abs(pred_vol_image_2).unsqueeze(1)
+                gt_slices_2d_2 = torch.abs(gt_vol_image_2).unsqueeze(1)
+                ssim_loss_2 = 1 - ssim(pred_slices_2d_2, gt_slices_2d_2)
+                loss["ssim_loss_2"] = ssim_loss_2
+                loss["total"] += 2.5*opt.lambda_dssim * loss["ssim_loss_2"]
 
         # 3D TV loss
         if use_tv:
@@ -190,20 +226,6 @@ def training(
                         bbox,
                         opt.use_las,
                     )
-            if False:
-                print("======================================================================")
-                print(f"[ITER {iteration}] Number of Gaussians: {gaussians.get_xyz.shape[0]}")
-                print(f"[ITER {iteration}] Loss: {loss['total'].item():.7f}, DC Loss: {loss['dc_loss'].item():.7f}")
-                print(f"[ITER {iteration}] Gaussians xyz: {gaussians.get_xyz}")
-                print(f"[ITER {iteration}] Gaussians xyz grad: {gaussians._xyz.grad}")
-                
-                print(f"[ITER {iteration}] Gaussians density: {gaussians.get_density}")
-                print(f"[ITER {iteration}] Gaussians original density: {gaussians._density}")
-                print(f"[ITER {iteration}] Gaussians density grad: {gaussians._density.grad}")
-                
-                print(f"[ITER {iteration}] Gaussians scale: {gaussians.get_scaling}")
-                print(f"[ITER {iteration}] Gaussians original scale: {gaussians._scaling}")
-                print(f"[ITER {iteration}] Gaussians scale grad: {gaussians._scaling.grad}")
 
             if gaussians.get_density.shape[0] == 0:
                 raise ValueError(
@@ -249,7 +271,7 @@ def training(
                             )
                         tqdm.write(
                             f"[ITER {iteration}] Saved slice-wise eval to {output_path}. "
-                            f"PSNR={eval_result['mean']['psnr']:.4f}, SSIM={eval_result['mean']['ssim']:.4f}, "
+                            f"PSNR={eval_result['mean']['psnr']:.4f}, SSIM={eval_result['mean']['ssim']:.4f}, LPIPS={eval_result['mean']['lpips']:.4f}, "
                             f"valid={eval_result['num_valid_slices']}/{eval_result['num_slices']}"
                         )
                     else:
@@ -334,12 +356,12 @@ if __name__ == "__main__":
     op = OptimizationParams(parser)
     pp = PipelineParams(parser)
     parser.add_argument("--detect_anomaly", action="store_true", default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[1,100,200,300,400, 500, 1000,1500,2000,2500,3000,5000,10000,15000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[1,100,200,300,400, 500, 1000,1500,2000,2500,3000,5000,10000,15000])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[400,500,1000,1500,2000,2500,3000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[400,500,1000,1500,2000,2500,3000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default=None)
-    parser.add_argument("--config", type=str, default='config/config_MRI.yaml', help="Path of config")  # debug config file
+    parser.add_argument("--config", type=str, default=None, help="Path of config")  # debug config file
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     args.test_iterations.append(args.iterations)

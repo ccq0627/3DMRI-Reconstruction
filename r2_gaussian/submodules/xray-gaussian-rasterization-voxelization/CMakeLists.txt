@@ -41,12 +41,24 @@ add_library(CudaVoxelizer
 	cuda_voxelizer/voxelizer.h
 )
 
+add_library(CudaSliceRasterizer
+	cuda_slice_rasterizer/forward.h
+	cuda_slice_rasterizer/forward.cu
+	cuda_slice_rasterizer/auxiliary.h
+	cuda_slice_rasterizer/slice_rasterizer_impl.h
+	cuda_slice_rasterizer/slice_rasterizer_impl.cu
+	cuda_slice_rasterizer/slice_rasterizer.h
+)
+
 set_target_properties(CudaRasterizer PROPERTIES CUDA_ARCHITECTURES "70;75;86")
 set_target_properties(CudaVoxelizer PROPERTIES CUDA_ARCHITECTURES "70;75;86")
-
+set_target_properties(CudaSliceRasterizer PROPERTIES CUDA_ARCHITECTURES "70;75;86")
 
 target_include_directories(CudaRasterizer PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/cuda_rasterizer)
 target_include_directories(CudaRasterizer PRIVATE third_party/glm ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
 
 target_include_directories(CudaVoxelizer PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/cuda_voxelizer)
 target_include_directories(CudaVoxelizer PRIVATE third_party/glm ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+
+target_include_directories(CudaSliceRasterizer PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/cuda_slice_rasterizer)
+target_include_directories(CudaSliceRasterizer PRIVATE third_party/glm ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})

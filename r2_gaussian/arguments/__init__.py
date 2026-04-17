@@ -27,7 +27,8 @@ class ModelParams(ParamGroup):
         self.scale_min = 0.0005  # percent of volume size
         self.scale_max = 0.5  # percent of volume size
         self.eval = False
-        self.accelerate_factor = 2
+        self.accelerate_factor = 8
+        self.mask_sigma = 30
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -62,14 +63,17 @@ class OptimizationParams(ParamGroup):
         self.lambda_tv = 1.0  # tv regularization weight
         self.lambda_edge = 0.05  # edge loss weight
         self.use_image_loss = True
+        self.multi_stage_loss = True
         self.use_las = True  # long axis split
         self.tv_vol_size = 32
         self.density_min_threshold = 0.0000001
+        self.prune_interval = 500
+        self.prune_until_iter = 2500
         self.densification_interval = 200
-        self.densify_from_iter = 500
-        self.densify_until_iter = 3_000
-        self.densify_grad_threshold = 5.0e-06
-        self.densify_scale_threshold = 0.001  # percent of volume size
+        self.densify_from_iter = 200
+        self.densify_until_iter = 1500
+        self.densify_grad_threshold = 1.0e-06
+        self.densify_scale_threshold = 0.10  # percent of volume size
         self.max_scale = None  # percent of volume size
         self.max_num_gaussians = 500_000
         super().__init__(parser, "Optimization Parameters")

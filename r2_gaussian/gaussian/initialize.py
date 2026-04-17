@@ -50,7 +50,7 @@ def initialize_gaussian(gaussians: GaussianModel, args: ModelParams, loaded_iter
             ply_path
         ), f"Cannot find {ply_path} for initialization. Please specify a valid ply_path or generate point cloud with initialize_pcd.py."
 
-        print(f"Initialize Gaussians with {osp.basename(ply_path)}")
+        print(f"Initialize Gaussians with {osp.basename(ply_path)} in {osp.dirname(ply_path)}.")
         ply_type = ply_path.split(".")[-1]
         if ply_type == "npy":
             point_cloud = np.load(ply_path)

@@ -75,6 +75,7 @@ def evaluate_slices(
 	pixel_max: float,
 	min_tissue: float,
 	use_mask: bool = True,
+	compute_lpips: bool = False,
 ) -> Dict:
 	if vol_gt.shape != vol_pred.shape:
 		raise ValueError(
@@ -109,12 +110,12 @@ def evaluate_slices(
 			pred_slice = pred_slice * mask_t
 
 
-		gt_4d = gt_slice[None, None]
+		gt_4d = gt_slice[None, None]  # [1, 1, H, W] for metric functions
 		pred_4d = pred_slice[None, None]
 
 		psnr_i = psnr(gt_4d, pred_4d, pixel_max=pixel_max).item()
 		ssim_i = ssim(gt_4d, pred_4d).item()
-		lpips_i = lpips(gt_4d, pred_4d, net_type='vgg').item()
+		lpips_i = lpips(gt_4d, pred_4d, net_type='vgg').item() if compute_lpips else 0.0
 
 		per_slice.append(
 			{
@@ -179,6 +180,7 @@ def main() -> None:
 		default="cpu",
 		help="Device to use for evaluation.",
 	)
+	parser.add_argument("--lpips", action="store_true", help="Whether to compute LPIPS metric (requires GPU).")
 	args = parser.parse_args()
 
 	if args.device == "cuda" and torch.cuda.is_available():
@@ -189,6 +191,9 @@ def main() -> None:
 		vol_pred = _load_volume(args.pred)
 
 	pixel_max = args.pixel_max if args.pixel_max is not None else float(vol_gt.max())
+	lpips = None
+	if args.lpips:
+		lpips = True
 	if pixel_max <= 0:
 		raise ValueError("pixel_max must be > 0.")
 
@@ -198,6 +203,7 @@ def main() -> None:
 		pixel_max=pixel_max,
 		min_tissue=args.min_tissue,
 		use_mask=args.use_mask,
+		compute_lpips=lpips,
 	)
 	result["gt_path"] = args.gt
 	result["pred_path"] = args.pred

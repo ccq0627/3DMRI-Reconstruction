@@ -55,6 +55,9 @@ def edge_loss_fn(pred_vol_image, gt_vol_image):
 
     return edge_loss
 
+def get_fre_weight(radii: torch.Tensor, t: float, alpha: float, beta: int, gamma: int) -> torch.Tensor:
+    return 1 + alpha * (radii ** gamma) * (t ** beta)
+
 
 def l1_loss(network_output, gt):
     return torch.abs((network_output - gt)).mean()

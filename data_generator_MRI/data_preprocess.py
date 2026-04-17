@@ -24,7 +24,7 @@ def main(args, lp: ModelParams):
     data_path = args.path
     if lp.accelerate_factor is not None:
         accelerate_factor = lp.accelerate_factor
-    dir_path = osp.join(osp.dirname(data_path),f"acc_rate{accelerate_factor}")
+    dir_path = osp.join(osp.dirname(data_path),f"acc_rate{accelerate_factor}_sigma{lp.mask_sigma}")
     os.makedirs(dir_path, exist_ok=True)
     ks_save_path = osp.join(dir_path, "kspace_gt.npy")  # 欠采样kspace 
     vol_unsampled_save_path = osp.join(dir_path, "vol_gt_unsampled.npy")  # IFFT
@@ -77,7 +77,7 @@ def main(args, lp: ModelParams):
     gc.collect()
 
     # get mask
-    mask_3d = get_mask(size=nVoxel,per=1.0/accelerate_factor)
+    mask_3d = get_mask(size=nVoxel, per=1.0/accelerate_factor, sigma=lp.mask_sigma)
     np.save(mask_save_path, mask_3d)
     
     # get kspace undersampled
@@ -98,6 +98,8 @@ def main(args, lp: ModelParams):
     np.save(vol_unsampled_save_path, vol_gt_undersampled_mag)
     del vol_gt_undersampled_mag
     gc.collect()
+
+    print(f"Data preprocessing completed. Files saved in {dir_path}.")
 
 
 if __name__ == "__main__":

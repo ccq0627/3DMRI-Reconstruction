@@ -24,12 +24,12 @@ def main(args, init_parser: InitParams_MRI, model_args: ModelParams):
     model_args.source_path = data_path
     scene = Scene(model_args)
     nii_cfg = scene.nii_cfg
-    vol = scene.vol_gt_unsampled.cpu().numpy()
-    # vol = np.load('MRIdata/under/pocs_recon.npy')
+    # vol = scene.vol_gt_unsampled.cpu().numpy()
+    vol = scene.vol_gt.cpu().numpy()
 
     save_path = args.output
     if not save_path:
-        save_path = osp.join(data_path, f"acc_rate{model_args.accelerate_factor}", "Init_pointcloud" + ".npy")
+        save_path = osp.join(data_path, f"acc_rate{model_args.accelerate_factor}_sigma{model_args.mask_sigma}", "Init_pointcloud" + ".npy")
 
     assert not osp.exists(
         save_path
