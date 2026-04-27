@@ -27,7 +27,7 @@ from r2_gaussian.utils.general_utils import safe_state, get_mask, fft, ifft
 from r2_gaussian.utils.cfg_utils import load_config
 from r2_gaussian.utils.log_utils import prepare_output_and_logger, setup_experiment_folder, prepare_tqdm_write_logger
 from r2_gaussian.dataset import Scene
-from r2_gaussian.utils.loss_utils import l1_loss, ssim, tv_3d_loss, edge_loss_fn
+from r2_gaussian.utils.loss_utils import l1_loss, L2_loss, ssim, tv_3d_loss, edge_loss_fn, l1_loss_image, l2_loss_image
 from r2_gaussian.utils.image_utils import metric_vol, metric_proj
 from r2_gaussian.utils.plot_utils import show_two_slice
 from metric_MRI import evaluate_slices, THRESHOLD
@@ -49,7 +49,7 @@ def training(
 
     # Set up dataset
     scene = Scene(dataset)
-    gt_vol_kspace = scene.vol_gt_kspace  # device = cuda  欠采样点的kspace
+    gt_vol_kspace: torch.Tensor = scene.vol_gt_kspace  # device = cuda  欠采样点的kspace
     mask: torch.Tensor = scene.mask
 
     gt_vol_image = ifft(gt_vol_kspace * mask)
@@ -144,16 +144,19 @@ def training(
         if opt.use_image_loss:
             pred_vol_image = ifft(pred_vol_kspace * mask)  # complex tensor
 
-            edge_loss = edge_loss_fn(pred_vol_image, gt_vol_image)
-            loss["edge_loss"] = edge_loss
-            loss["total"] += opt.lambda_edge * loss["edge_loss"]
+            loss["image"] = l1_loss_image(pred_vol_image.unsqueeze(1), gt_vol_image.unsqueeze(1))
+            loss["total"] += loss["image"]
 
-            # 2D SSIM on each slice (first dim is depth): [D, H, W] -> [D, 1, H, W]
-            pred_slices_2d = torch.abs(pred_vol_image).unsqueeze(1)
-            gt_slices_2d = torch.abs(gt_vol_image).unsqueeze(1)
-            ssim_loss = 1 - ssim(pred_slices_2d, gt_slices_2d)
-            loss["ssim_loss"] = ssim_loss
-            loss["total"] += opt.lambda_dssim * loss["ssim_loss"]
+            # edge_loss = edge_loss_fn(pred_vol_image, gt_vol_image)
+            # loss["edge_loss"] = edge_loss
+            # loss["total"] += opt.lambda_edge * loss["edge_loss"]
+
+            # 2D SSIM on each slice (first dim is depth): [B, H, W] -> [B, 1, H, W]
+            # pred_slices_2d = torch.abs(pred_vol_image).unsqueeze(1)
+            # gt_slices_2d = torch.abs(gt_vol_image).unsqueeze(1)
+            # ssim_loss = 1 - ssim(pred_slices_2d, gt_slices_2d)
+            # loss["ssim_loss"] = ssim_loss
+            # loss["total"] += opt.lambda_dssim * loss["ssim_loss"]
 
 
             # 2026/4/41 add mutil stage fre and image loss
@@ -162,41 +165,46 @@ def training(
 
                 pred_vol_kspace_1 = fft(pred_vol_image)
                 
-                dc_loss_1 = l1_loss(pred_vol_kspace_1[mask.bool()], gt_vol_kspace_1[mask.bool()])
-                loss["dc_loss_1"] = dc_loss_1
-                loss["total"] += 2.5*loss["dc_loss_1"]
+                # dc_loss_1 = l1_loss(pred_vol_kspace_1[mask.bool()], gt_vol_kspace_1[mask.bool()])
+                # loss["dc_loss_1"] = dc_loss_1
+                # loss["total"] += loss["dc_loss_1"]
 
                 pred_vol_image_1 = ifft(pred_vol_kspace_1 * mask)
-                
-                edge_loss_1 = edge_loss_fn(pred_vol_image_1, gt_vol_image_1)
-                loss["edge_loss_1"] = edge_loss_1
-                loss["total"] += 2.5*opt.lambda_edge * loss["edge_loss_1"]
 
-                pred_slices_2d_1 = torch.abs(pred_vol_image_1).unsqueeze(1)
-                gt_slices_2d_1 = torch.abs(gt_vol_image_1).unsqueeze(1)
-                ssim_loss_1 = 1 - ssim(pred_slices_2d_1, gt_slices_2d_1)
-                loss["ssim_loss_1"] = ssim_loss_1
-                loss["total"] += 2.5*opt.lambda_dssim * loss["ssim_loss_1"]
+                loss["image_1"] = l1_loss_image(pred_vol_image_1.unsqueeze(1), gt_vol_image_1.unsqueeze(1))
+                loss["total"] += loss["image_1"]
+
+                # edge_loss_1 = edge_loss_fn(pred_vol_image_1, gt_vol_image_1)
+                # loss["edge_loss_1"] = edge_loss_1
+                # loss["total"] += opt.lambda_edge * loss["edge_loss_1"]
+
+                # pred_slices_2d_1 = torch.abs(pred_vol_image_1).unsqueeze(1)
+                # gt_slices_2d_1 = torch.abs(gt_vol_image_1).unsqueeze(1)
+                # ssim_loss_1 = 1 - ssim(pred_slices_2d_1, gt_slices_2d_1)
+                # loss["ssim_loss_1"] = ssim_loss_1
+                # loss["total"] += opt.lambda_dssim * loss["ssim_loss_1"]
 
                 # two stage
                 pred_vol_kspace_2 = fft(pred_vol_image_1)
                 
-                dc_loss_2 = l1_loss(pred_vol_kspace_2[mask.bool()] , gt_vol_kspace_2[mask.bool()] )
-                loss["dc_loss_2"] = dc_loss_2
-                loss["total"] += 2.5*loss["dc_loss_2"]
+                # dc_loss_2 = l1_loss(pred_vol_kspace_2[mask.bool()] , gt_vol_kspace_2[mask.bool()] )
+                # loss["dc_loss_2"] = dc_loss_2
+                # loss["total"] += loss["dc_loss_2"]
 
                 pred_vol_image_2 = ifft(pred_vol_kspace_2 * mask)
-                
 
-                edge_loss_2 = edge_loss_fn(pred_vol_image_2, gt_vol_image_2)
-                loss["edge_loss_2"] = edge_loss_2
-                loss["total"] += 2.5*opt.lambda_edge * loss["edge_loss_2"]
+                loss["image_2"] = l1_loss_image(pred_vol_image_2.unsqueeze(1), gt_vol_image_2.unsqueeze(1))
+                loss["total"] += loss["image_2"]
 
-                pred_slices_2d_2 = torch.abs(pred_vol_image_2).unsqueeze(1)
-                gt_slices_2d_2 = torch.abs(gt_vol_image_2).unsqueeze(1)
-                ssim_loss_2 = 1 - ssim(pred_slices_2d_2, gt_slices_2d_2)
-                loss["ssim_loss_2"] = ssim_loss_2
-                loss["total"] += 2.5*opt.lambda_dssim * loss["ssim_loss_2"]
+                # edge_loss_2 = edge_loss_fn(pred_vol_image_2, gt_vol_image_2)
+                # loss["edge_loss_2"] = edge_loss_2
+                # loss["total"] += opt.lambda_edge * loss["edge_loss_2"]
+
+                # pred_slices_2d_2 = torch.abs(pred_vol_image_2).unsqueeze(1)
+                # gt_slices_2d_2 = torch.abs(gt_vol_image_2).unsqueeze(1)
+                # ssim_loss_2 = 1 - ssim(pred_slices_2d_2, gt_slices_2d_2)
+                # loss["ssim_loss_2"] = ssim_loss_2
+                # loss["total"] += opt.lambda_dssim * loss["ssim_loss_2"]
 
         # 3D TV loss
         if use_tv:
@@ -356,8 +364,8 @@ if __name__ == "__main__":
     op = OptimizationParams(parser)
     pp = PipelineParams(parser)
     parser.add_argument("--detect_anomaly", action="store_true", default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[400,500,1000,1500,2000,2500,3000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[400,500,1000,1500,2000,2500,3000])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[500,1100,1500,2000,2500,3000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[500,1100,1500,2000,2500,3000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default=None)

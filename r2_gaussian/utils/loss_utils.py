@@ -62,14 +62,19 @@ def get_fre_weight(radii: torch.Tensor, t: float, alpha: float, beta: int, gamma
 def l1_loss(network_output, gt):
     return torch.abs((network_output - gt)).mean()
 
-def l1_loss_image(network_output, gt):
-    return torch.abs(torch.abs(network_output) - torch.abs(gt)).mean()
+def l1_loss_image(network_output, gt):  # [B,1,H,W]
+    loss = [torch.abs(network_output[i] - gt[i]).mean() for i in range(network_output.shape[0])]
+    return torch.stack(loss).mean()
 
-def l2_loss(network_output, gt):
-    return ((network_output - gt) ** 2).mean()
+def l2_loss_image(network_output, gt):  # [B,1,H,W]
+    loss = [((torch.abs(network_output[i] - gt[i]))**2).mean() for i in range(network_output.shape[0])]
+    return torch.stack(loss).mean()
 
 def L2_loss(network_output, gt):
     return ((torch.abs(network_output - gt))**2).mean()
+
+def l2_loss(network_output, gt):
+    return ((network_output - gt) ** 2).mean()
 
 def gaussian(window_size, sigma):
     gauss = torch.Tensor(

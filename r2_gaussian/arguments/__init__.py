@@ -26,7 +26,7 @@ class ModelParams(ParamGroup):
         self.ply_path = ""  # Path to initialization point cloud (if None, we will try to find `init_*.npy`.)
         self.scale_min = 0.0005  # percent of volume size
         self.scale_max = 0.5  # percent of volume size
-        self.eval = False
+        self.eval = True
         self.accelerate_factor = 8
         self.mask_sigma = 30
         super().__init__(parser, "Loading Parameters", sentinel)

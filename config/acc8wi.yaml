@@ -1,0 +1,4 @@
+source_path: MRIdata
+accelerate_factor: 8
+use_image_loss: True
+multi_stage_loss: True

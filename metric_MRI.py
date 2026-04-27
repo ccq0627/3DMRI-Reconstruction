@@ -177,7 +177,7 @@ def main() -> None:
 	parser.add_argument(
 		"--device",
 		type=str,
-		default="cpu",
+		default="cuda",
 		help="Device to use for evaluation.",
 	)
 	parser.add_argument("--lpips", action="store_true", help="Whether to compute LPIPS metric (requires GPU).")
