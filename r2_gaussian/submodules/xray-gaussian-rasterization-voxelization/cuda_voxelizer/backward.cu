@@ -11,6 +11,7 @@
 
 #include "backward.h"
 #include "auxiliary.h"
+#include <math.h>
 #include <cooperative_groups.h>
 #include <cooperative_groups/reduce.h>
 namespace cg = cooperative_groups;
@@ -262,7 +263,8 @@ renderCUDA(
 	__shared__ float collected_conic_d[BLOCK3D_SIZE];
 	__shared__ float collected_conic_e[BLOCK3D_SIZE];
 	__shared__ float collected_conic_f[BLOCK3D_SIZE];
-	__shared__ float collected_o[BLOCK3D_SIZE];
+	__shared__ float collected_o0[BLOCK3D_SIZE];
+	__shared__ float collected_o1[BLOCK3D_SIZE];
 
 	// We start from the back. The ID of the last contributing
 	// Gaussian is known from each pixel from the forward.
@@ -292,13 +294,16 @@ renderCUDA(
 			const int coll_id = point_list[range.y - progress - 1];
 			collected_id[block.thread_rank()] = coll_id;
 			collected_xyz[block.thread_rank()] = points_xyz_vol[coll_id];
-			collected_conic_a[block.thread_rank()] = conic_opacity[coll_id * 7 + 0];
-			collected_conic_b[block.thread_rank()] = conic_opacity[coll_id * 7 + 1];
-			collected_conic_c[block.thread_rank()] = conic_opacity[coll_id * 7 + 2];
-			collected_conic_d[block.thread_rank()] = conic_opacity[coll_id * 7 + 3];
-			collected_conic_e[block.thread_rank()] = conic_opacity[coll_id * 7 + 4];
-			collected_conic_f[block.thread_rank()] = conic_opacity[coll_id * 7 + 5];
-			collected_o[block.thread_rank()] = conic_opacity[coll_id * 7 + 6];
+			const int opacity_offset = coll_id * (6 + C);
+			collected_conic_a[block.thread_rank()] = conic_opacity[opacity_offset + 0];
+			collected_conic_b[block.thread_rank()] = conic_opacity[opacity_offset + 1];
+			collected_conic_c[block.thread_rank()] = conic_opacity[opacity_offset + 2];
+			collected_conic_d[block.thread_rank()] = conic_opacity[opacity_offset + 3];
+			collected_conic_e[block.thread_rank()] = conic_opacity[opacity_offset + 4];
+			collected_conic_f[block.thread_rank()] = conic_opacity[opacity_offset + 5];
+			collected_o0[block.thread_rank()] = conic_opacity[opacity_offset + 6];
+			if (C > 1)
+				collected_o1[block.thread_rank()] = conic_opacity[opacity_offset + 7];
 		}
 		block.sync();
 
@@ -321,7 +326,8 @@ renderCUDA(
 			float conic_d = collected_conic_d[j];
 			float conic_e = collected_conic_e[j];
 			float conic_f = collected_conic_f[j];
-			float opa = collected_o[j];
+			float opa0 = collected_o0[j];
+			float opa1 = C > 1 ? collected_o1[j] : 0.0f;
 
 			float power = - 0.5 * (conic_a * d.x * d.x + conic_d * d.y * d.y + conic_f * d.z * d.z) - conic_b * d.x * d.y - conic_c * d.x * d.z - conic_e * d.y * d.z;
 
@@ -330,25 +336,23 @@ renderCUDA(
 
 			const float G = exp(power);
 
-			// float alpha = min(1.0f, opa * G);
-			float alpha = opa * G;
-			if (alpha < 0.000001f)
-				continue;
-			
-			// Propagate gradients to per-Gaussian colors and keep
-			// gradients w.r.t. alpha (blending factor for a Gaussian/pixel
-			// pair).
-			// Since we are simple sum, dchannel_dalpha = 1.0
-			float dL_dalpha = 0.0f;
-			const int global_id = collected_id[j];
-			for (int ch = 0; ch < C; ch++)
+			float alpha0 = opa0 * G;
+			float alpha1 = (C > 1) ? opa1 * G : 0.0f;
+			if (C == 1)
 			{
-				const float dL_dchannel = dL_dpixel[ch];
-				dL_dalpha += 1.0f * dL_dchannel;
+				if (alpha0 < 0.000001f)
+					continue;
 			}
-
-			// Helpful reusable temporary variables
-			const float dL_dG = opa * dL_dalpha;
+			else
+			{
+				if (fabsf(alpha0) + fabsf(alpha1) < 0.000001f)
+					continue;
+			}
+			
+			const int global_id = collected_id[j];
+			const float dL_dG = (C > 1)
+				? (opa0 * dL_dpixel[0] + opa1 * dL_dpixel[1])
+				: (opa0 * dL_dpixel[0]);
 			const float gdx = G * d.x;
 			const float gdy = G * d.y;
 			const float gdz = G * d.z;
@@ -367,7 +371,9 @@ renderCUDA(
 			atomicAdd(&dL_dconic3D[global_id * 6 + 4], - 1.0 * gdy * d.z * dL_dG);  // conic_e
 			atomicAdd(&dL_dconic3D[global_id * 6 + 5], - 0.5 * gdz * d.z * dL_dG);  // conic_f
 
-			atomicAdd(&dL_dopacity[global_id], G * dL_dalpha);
+			atomicAdd(&dL_dopacity[global_id * C + 0], G * dL_dpixel[0]);
+			if (C > 1)
+				atomicAdd(&dL_dopacity[global_id * C + 1], G * dL_dpixel[1]);
 		}
 	}
 	

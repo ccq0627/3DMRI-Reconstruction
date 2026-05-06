@@ -55,7 +55,7 @@ VoxelizeGaussiansCUDA(
     auto int_opts = means3D.options().dtype(torch::kInt32);
     auto float_opts = means3D.options().dtype(torch::kFloat32);
 
-	torch::Tensor out_volume = torch::full({nVoxel_x, nVoxel_y, nVoxel_z}, 0.0, float_opts);
+	torch::Tensor out_volume = torch::full({NUM_CHANNELS, nVoxel_x, nVoxel_y, nVoxel_z}, 0.0, float_opts);
 	torch::Tensor radii_x = torch::full({P}, 0, means3D.options().dtype(torch::kInt32));
 	torch::Tensor radii_y = torch::full({P}, 0, means3D.options().dtype(torch::kInt32));
 	torch::Tensor radii_z = torch::full({P}, 0, means3D.options().dtype(torch::kInt32));
@@ -130,7 +130,7 @@ VoxelizeGaussiansBackwardCUDA(
 	torch::Tensor dL_dmeans3D = torch::zeros({P, 3}, means3D.options());
 	torch::Tensor dL_dmeans3D_norm = torch::zeros({P, 3}, means3D.options());
 	torch::Tensor dL_dconic3D = torch::zeros({P, 6}, means3D.options());
-	torch::Tensor dL_dopacity = torch::zeros({P, 1}, means3D.options());
+	torch::Tensor dL_dopacity = torch::zeros({P, NUM_CHANNELS}, means3D.options());
 	torch::Tensor dL_dcov3D = torch::zeros({P, 6}, means3D.options());
 	torch::Tensor dL_dscales = torch::zeros({P, 3}, means3D.options());
 	torch::Tensor dL_drotations = torch::zeros({P, 4}, means3D.options());

@@ -15,6 +15,18 @@ import torch
 from . import _C
 
 
+def _ensure_opacity_channels(opacities: torch.Tensor, channels: int = 2) -> torch.Tensor:
+    if opacities.is_complex():
+        opacities = torch.stack([opacities.real, opacities.imag], dim=-1)
+    if opacities.dim() == 1:
+        opacities = opacities.unsqueeze(1)
+    if opacities.shape[1] == 1:
+        opacities = torch.cat([opacities, torch.zeros_like(opacities)], dim=1)
+    elif opacities.shape[1] > channels:
+        opacities = opacities[:, :channels]
+    return opacities.contiguous()
+
+
 def cpu_deep_copy_tuple(input_tuple):
     copied_tensors = [
         item.cpu().clone() if isinstance(item, torch.Tensor) else item
@@ -46,6 +58,7 @@ def voxelize_gaussians(
     cov3Ds_precomp,
     voxel_settings: GaussianVoxelizationSettings,
 ):
+    opacities = _ensure_opacity_channels(opacities)
     return _VoxelizeGaussians.apply(
         means3D,
         opacities,

@@ -153,6 +153,10 @@ def main(
                 pipe_args,
             )["vol"]
             vol_gt = scene.vol_gt.cuda()
+            if torch.is_complex(vol_pred):
+                vol_pred = torch.abs(vol_pred)
+            if torch.is_complex(vol_gt):
+                vol_gt = torch.abs(vol_gt)
             psnr_3d, _ = metric_vol(vol_gt, vol_pred, "psnr")
             print(f"3D PSNR for initial Gaussians: {psnr_3d}")
             # show_two_volume(vol_gt, vol_pred, title1="gt", title2="init")

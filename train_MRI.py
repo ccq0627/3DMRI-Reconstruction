@@ -22,7 +22,7 @@ import torch.nn.functional as F
 
 sys.path.append("./")
 from r2_gaussian.arguments import ModelParams, OptimizationParams, PipelineParams
-from r2_gaussian.gaussian import GaussianModel, render, query, initialize_gaussian, slice_rasterize
+from r2_gaussian.gaussian import GaussianModel, query, initialize_gaussian
 from r2_gaussian.utils.general_utils import safe_state, get_mask, fft, ifft
 from r2_gaussian.utils.cfg_utils import load_config
 from r2_gaussian.utils.log_utils import prepare_output_and_logger, setup_experiment_folder, prepare_tqdm_write_logger
@@ -337,6 +337,10 @@ def training_report(
         # Evaluate 3D reconstruction performance
         vol_pred = queryFunc(scene.gaussians)["vol"]
         vol_gt = scene.vol_gt  # device = cuda
+        if torch.is_complex(vol_pred):
+            vol_pred = torch.abs(vol_pred)
+        if torch.is_complex(vol_gt):
+            vol_gt = torch.abs(vol_gt)
         psnr_3d, _ = metric_vol(vol_gt, vol_pred, "psnr")
         ssim_3d, ssim_3d_axis = metric_vol(vol_gt, vol_pred, "ssim")
         eval_dict = {
@@ -369,7 +373,7 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default=None)
-    parser.add_argument("--config", type=str, default=None, help="Path of config")  # debug config file
+    parser.add_argument("--config", type=str, default='config/acc8woi.yaml', help="Path of config")  # debug config file
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     args.test_iterations.append(args.iterations)

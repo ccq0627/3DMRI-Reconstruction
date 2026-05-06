@@ -136,7 +136,7 @@ CudaVoxelizer::GeometryState CudaVoxelizer::GeometryState::fromChunk(char*& chun
 	obtain(chunk, geom.internal_radii_z, P, 128);
 	obtain(chunk, geom.means3D_norm, P, 128);
 	obtain(chunk, geom.cov3D, P * 6, 128);
-	obtain(chunk, geom.conic_opacity, P * 7, 128);
+	obtain(chunk, geom.conic_opacity, P * (6 + NUM_CHANNELS), 128);
 	obtain(chunk, geom.tiles_touched, P, 128);
 	cub::DeviceScan::InclusiveSum(nullptr, geom.scan_size, geom.tiles_touched, geom.tiles_touched, P);
 	obtain(chunk, geom.scanning_space, geom.scan_size, 128);

@@ -168,13 +168,16 @@ __global__ void preprocessCUDA(int P,
 	tiles_touched[idx] = (cube_max.z - cube_min.z) * (cube_max.y - cube_min.y) * (cube_max.x - cube_min.x);
 	depths[idx] = p_orig.z;  // just give a value
 	points_xyz_vol[idx] = point_vol;
-	conic_opacity[idx * 7 + 0] = inv_a;
-	conic_opacity[idx * 7 + 1] = inv_b;
-	conic_opacity[idx * 7 + 2] = inv_c;
-	conic_opacity[idx * 7 + 3] = inv_d;
-	conic_opacity[idx * 7 + 4] = inv_e;
-	conic_opacity[idx * 7 + 5] = inv_f;
-	conic_opacity[idx * 7 + 6] = opacities[idx];
+	const int opacity_offset = idx * (6 + C);
+	conic_opacity[opacity_offset + 0] = inv_a;
+	conic_opacity[opacity_offset + 1] = inv_b;
+	conic_opacity[opacity_offset + 2] = inv_c;
+	conic_opacity[opacity_offset + 3] = inv_d;
+	conic_opacity[opacity_offset + 4] = inv_e;
+	conic_opacity[opacity_offset + 5] = inv_f;
+	conic_opacity[opacity_offset + 6] = opacities[idx * C + 0];
+	if (C > 1)
+		conic_opacity[opacity_offset + 7] = opacities[idx * C + 1];
 }
 
 // Main rasterization method. Collaboratively works on one tile per
@@ -224,7 +227,8 @@ renderCUDA(
 	__shared__ float collected_conic_d[BLOCK3D_SIZE];
 	__shared__ float collected_conic_e[BLOCK3D_SIZE];
 	__shared__ float collected_conic_f[BLOCK3D_SIZE];
-	__shared__ float collected_o[BLOCK3D_SIZE];
+	__shared__ float collected_o0[BLOCK3D_SIZE];
+	__shared__ float collected_o1[BLOCK3D_SIZE];
 
 	// Initialize helper variables
 	uint32_t contributor = 0;
@@ -246,13 +250,16 @@ renderCUDA(
 			int coll_id = point_list[range.x + progress];
 			collected_id[block.thread_rank()] = coll_id;
 			collected_xyz[block.thread_rank()] = points_xyz_vol[coll_id];
-			collected_conic_a[block.thread_rank()] = conic_opacity[coll_id * 7 + 0];
-			collected_conic_b[block.thread_rank()] = conic_opacity[coll_id * 7 + 1];
-			collected_conic_c[block.thread_rank()] = conic_opacity[coll_id * 7 + 2];
-			collected_conic_d[block.thread_rank()] = conic_opacity[coll_id * 7 + 3];
-			collected_conic_e[block.thread_rank()] = conic_opacity[coll_id * 7 + 4];
-			collected_conic_f[block.thread_rank()] = conic_opacity[coll_id * 7 + 5];
-			collected_o[block.thread_rank()] = conic_opacity[coll_id * 7 + 6];
+			const int opacity_offset = coll_id * (6 + CHANNELS);
+			collected_conic_a[block.thread_rank()] = conic_opacity[opacity_offset + 0];
+			collected_conic_b[block.thread_rank()] = conic_opacity[opacity_offset + 1];
+			collected_conic_c[block.thread_rank()] = conic_opacity[opacity_offset + 2];
+			collected_conic_d[block.thread_rank()] = conic_opacity[opacity_offset + 3];
+			collected_conic_e[block.thread_rank()] = conic_opacity[opacity_offset + 4];
+			collected_conic_f[block.thread_rank()] = conic_opacity[opacity_offset + 5];
+			collected_o0[block.thread_rank()] = conic_opacity[opacity_offset + 6];
+			if (CHANNELS > 1)
+				collected_o1[block.thread_rank()] = conic_opacity[opacity_offset + 7];
 		}
 		block.sync();
 		
@@ -269,7 +276,8 @@ renderCUDA(
 			float conic_d = collected_conic_d[j];
 			float conic_e = collected_conic_e[j];
 			float conic_f = collected_conic_f[j];
-			float opa = collected_o[j];
+			float opa0 = collected_o0[j];
+			float opa1 = CHANNELS > 1 ? collected_o1[j] : 0.0f;
 
 			float power = - 0.5 * (conic_a * d.x * d.x + conic_d * d.y * d.y + conic_f * d.z * d.z) - conic_b * d.x * d.y - conic_c * d.x * d.z - conic_e * d.y * d.z;
 			
@@ -289,13 +297,21 @@ renderCUDA(
 				continue;
 
 			// float alpha = min(1.0f, opa * exp(power));
-			float alpha = opa * exp(power);
-			if (alpha < 0.000001f)
-				continue;
-
-			// Simply add all alphas
-			for (int ch = 0; ch < CHANNELS; ch++)
-				C[ch] += alpha;
+			float alpha0 = opa0 * exp(power);
+			if (CHANNELS == 1)
+			{
+				if (alpha0 < 0.000001f)
+					continue;
+				C[0] += alpha0;
+			}
+			else
+			{
+				float alpha1 = opa1 * exp(power);
+				if (fabsf(alpha0) + fabsf(alpha1) < 0.000001f)
+					continue;
+				C[0] += alpha0;
+				C[1] += alpha1;
+			}
 			
 			// Keep track of last range entry to update this
 			// pixel.

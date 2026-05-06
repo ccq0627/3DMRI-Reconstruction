@@ -1,0 +1,2 @@
+2026-05-06 14:14:14,627 | Initialize gaussians from 200000 estimated points
+2026-05-06 14:14:17,167 | [ITER 1] Evaluating: psnr3d 16.172, ssim3d 0.434, pts: 200000

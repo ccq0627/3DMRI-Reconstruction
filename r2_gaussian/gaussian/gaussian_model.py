@@ -16,7 +16,7 @@ from torch import nn
 import numpy as np
 import pickle
 from plyfile import PlyData, PlyElement
-
+from tqdm import tqdm
 sys.path.append("./")
 
 from simple_knn._C import distCUDA2
@@ -60,8 +60,10 @@ class GaussianModel:
             self.scaling_inverse_activation = torch.log
         self.covariance_activation = build_covariance_from_scaling_rotation
 
-        self.density_activation = torch.nn.Softplus()  # use softplus for [0, +inf]
-        self.density_inverse_activation = inverse_softplus
+        # self.density_activation = torch.nn.Softplus()  # use softplus for [0, +inf]
+        # self.density_inverse_activation = inverse_softplus
+        self.density_activation = lambda x: x
+        self.density_inverse_activation = lambda x: x
 
         self.rotation_activation = torch.nn.functional.normalize
 
@@ -69,7 +71,7 @@ class GaussianModel:
         self._xyz = torch.empty(0)  # world coordinate
         self._scaling = torch.empty(0)  # 3d scale
         self._rotation = torch.empty(0)  # rotation expressed in quaternions
-        self._density = torch.empty(0)  # density
+        self._density = torch.empty((0, 2))  # density (real, imag), expect shape [n, 2]
         self.xyz_gradient_accum = torch.empty(0)
         self.denom = torch.empty(0)
         self.optimizer = None
@@ -102,10 +104,15 @@ class GaussianModel:
             self.spatial_lr_scale,
             self.scale_bound,
         ) = model_args
+        if self._density.numel() > 0:
+            self._density = self._ensure_density_param(self._density)
         self.training_setup(training_args)
         self.xyz_gradient_accum = xyz_gradient_accum
         self.denom = denom
-        self.optimizer.load_state_dict(opt_dict)
+        try:
+            self.optimizer.load_state_dict(opt_dict)
+        except RuntimeError as exc:
+            print(f"Skip optimizer state restore: {exc}")
         self.setup_functions()  # Reset activation functions
 
     @property
@@ -122,7 +129,31 @@ class GaussianModel:
 
     @property
     def get_density(self):
-        return self.density_activation(self._density)
+        density = self.get_density_components
+        if density.numel() == 0:
+            return density.reshape(0, 1)
+        mag = torch.sqrt(density[:, 0:1] ** 2 + density[:, 1:2] ** 2)
+        return mag
+
+    @property
+    def get_density_components(self):
+        density = self.density_activation(self._density)
+        if density.numel() == 0:
+            return density.reshape(0, 2)
+        if density.ndim == 1:
+            density = density.view(-1, 1)
+        if density.shape[1] == 1:
+            density = torch.cat([density, torch.zeros_like(density)], dim=1)
+        elif density.shape[1] > 2:
+            density = density[:, :2]
+        return density  # shape: [n, 2]
+
+    @property
+    def get_density_complex(self):
+        density = self.get_density_components  # [n, 2]
+        if density.numel() == 0:
+            return torch.complex(density.reshape(0), density.reshape(0))
+        return torch.view_as_complex(density)
 
     def get_covariance(self, scaling_modifier=1):
         return self.covariance_activation(
@@ -133,14 +164,32 @@ class GaussianModel:
         self.spatial_lr_scale = spatial_lr_scale
 
         fused_point_cloud = torch.tensor(xyz).float().cuda()
-        print(
+        tqdm.write(
             "Initialize gaussians from {} estimated points".format(
                 fused_point_cloud.shape[0]
             )
         )  #[n, 3]
-        fused_density = (
-            self.density_inverse_activation(torch.tensor(density)).float().cuda()
-        )
+        density_arr = np.asarray(density)
+        if np.iscomplexobj(density_arr):
+            density_real = np.real(density_arr)
+            density_imag = np.imag(density_arr)
+            if density_real.ndim == 1:
+                density_real = density_real[:, None]
+                density_imag = density_imag[:, None]
+            density_arr = np.concatenate([density_real, density_imag], axis=1)
+        else:
+            if density_arr.ndim == 1:
+                density_arr = density_arr[:, None]
+            if density_arr.shape[1] == 1:
+                density_arr = np.concatenate(
+                    [density_arr, np.zeros_like(density_arr)], axis=1
+                )
+            elif density_arr.shape[1] > 2:
+                density_arr = density_arr[:, :2]
+            assert density_arr.shape[1] == 2, "Density must have 2 channels (real and imag)."
+        fused_density: torch.Tensor = self.density_inverse_activation(
+            torch.tensor(density_arr, dtype=torch.float, device="cuda")
+        )  # [n, 2]
         dist = torch.sqrt(
             torch.clamp_min(
                 distCUDA2(fused_point_cloud),
@@ -168,8 +217,8 @@ class GaussianModel:
                 torch.tensor([[0.0, 0.0, 0.0]]).float().cuda()
             )  # position: [0,0,0]
             fused_density = self.density_inverse_activation(
-                torch.tensor([[0.8]]).float().cuda()
-            )  # density: 0.8
+                torch.tensor([[0.8, 0.0]], dtype=torch.float, device="cuda")
+            )  # density: 0.8 + 0.0i
             scales = self.scaling_inverse_activation(
                 torch.tensor([[0.5, 0.5, 0.5]]).float().cuda()
             )  # scale: 0.5
@@ -278,11 +327,12 @@ class GaussianModel:
             pickle.dump(out, f, pickle.HIGHEST_PROTOCOL)
 
     def reset_density(self, reset_density=1.0):
-        densities_new = self.density_inverse_activation(
-            torch.min(
-                self.get_density, torch.ones_like(self.get_density) * reset_density
-            )
-        )
+        density = self.get_density_components  # [n, 2]
+        if density.numel() == 0:
+            return
+        mag = torch.sqrt(density[:, 0:1] ** 2 + density[:, 1:2] ** 2)
+        scale = torch.clamp(reset_density / (mag + EPS), max=1.0)
+        densities_new = self.density_inverse_activation(density * scale)
         optimizable_tensors = self.replace_tensor_to_optimizer(densities_new, "density")
         self._density = optimizable_tensors["density"]
 
@@ -296,11 +346,10 @@ class GaussianModel:
                 True
             )
         )
-        self._density = nn.Parameter(
-            torch.tensor(
-                data["density"], dtype=torch.float, device="cuda"
-            ).requires_grad_(True)
+        density = torch.tensor(
+            data["density"], dtype=torch.float, device="cuda"
         )
+        self._density = self._ensure_density_param(density)
         self._scaling = nn.Parameter(
             torch.tensor(
                 data["scale"], dtype=torch.float, device="cuda"
@@ -446,7 +495,7 @@ class GaussianModel:
         new_rotation = self._rotation[selected_pts_mask].repeat(N, 1)
         # new_density = self._density[selected_pts_mask].repeat(N, 1)
         new_density = self.density_inverse_activation(
-            self.get_density[selected_pts_mask].repeat(N, 1) * (1 / N)
+            self.get_density_components[selected_pts_mask].repeat(N, 1) * (1 / N)
         )
 
         self.densification_postfix(
@@ -477,7 +526,7 @@ class GaussianModel:
         new_xyz = self._xyz[selected_pts_mask]
         # new_densities = self._density[selected_pts_mask]
         new_densities = self.density_inverse_activation(
-            self.get_density[selected_pts_mask] * 0.5
+            self.get_density_components[selected_pts_mask] * 0.5
         )
         new_scaling = self._scaling[selected_pts_mask]
         new_rotation = self._rotation[selected_pts_mask]
@@ -513,7 +562,7 @@ class GaussianModel:
         new_rotation = self._rotation[selected_pts_mask].repeat(N, 1)
         # new_density = self._density[selected_pts_mask].repeat(N, 1)
         new_density = self.density_inverse_activation(
-            self.get_density[selected_pts_mask].repeat(N, 1) * (1 / N)
+            self.get_density_components[selected_pts_mask].repeat(N, 1) * (1 / N)
         )
 
         self.densification_postfix(
@@ -560,7 +609,9 @@ class GaussianModel:
 
         new_rotation = self._rotation[selected_pts_mask].repeat(2, 1)
 
-        new_density = self.density_inverse_activation(self.get_density[selected_pts_mask].repeat(2, 1) * reduction)
+        new_density = self.density_inverse_activation(
+            self.get_density_components[selected_pts_mask].repeat(2, 1) * reduction
+        )
 
         self.densification_postfix(
             new_xyz,
@@ -668,6 +719,17 @@ class GaussianModel:
         self.prune_points(prune_mask)
 
         torch.cuda.empty_cache()
+
+    def _ensure_density_param(self, density: torch.Tensor) -> nn.Parameter:
+        if density.numel() == 0:
+            return nn.Parameter(density.reshape(0, 2).requires_grad_(True))
+        if density.ndim == 1:
+            density = density.view(-1, 1)
+        if density.shape[1] == 1:
+            density = torch.cat([density, torch.zeros_like(density)], dim=1)
+        elif density.shape[1] > 2:
+            density = density[:, :2]
+        return nn.Parameter(density.requires_grad_(True))
 
     
 

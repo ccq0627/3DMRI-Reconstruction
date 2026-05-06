@@ -30,9 +30,6 @@ setup(
                 "cuda_voxelizer/forward.cu",
                 "cuda_voxelizer/backward.cu",
                 "voxelize_points.cu",
-                "cuda_slice_rasterizer/slice_rasterizer_impl.cu",
-                "cuda_slice_rasterizer/forward.cu",
-                "slice_points.cu",
                 "ext.cpp",
             ],
             extra_compile_args={

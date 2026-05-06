@@ -41,6 +41,7 @@ class PipelineParams(ParamGroup):
     def __init__(self, parser):
         self.compute_cov3D_python = False
         self.debug = False
+        self.use_complex_density = False  # decide whether to use complex to represnet density.
         super().__init__(parser, "Pipeline Parameters")
 
 

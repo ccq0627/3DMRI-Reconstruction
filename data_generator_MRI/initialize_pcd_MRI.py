@@ -37,7 +37,10 @@ def main(args, init_parser: InitParams_MRI, model_args: ModelParams):
     os.makedirs(osp.dirname(save_path), exist_ok=True)
 
     def init_pcd(
-        args, save_path, nii_cfg, vol
+        args: InitParams_MRI, 
+        save_path: str, 
+        nii_cfg: dict, 
+        vol: np.ndarray
     ):
         "Initialize spare points to create Gaussians."
         n_points = args.n_points

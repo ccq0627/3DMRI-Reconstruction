@@ -93,6 +93,10 @@ class Scene:
         if queryfunc is not None:
             vol_pred = queryfunc(self.gaussians)["vol"]
             vol_gt = self.vol_gt
+            if torch.is_complex(vol_pred):
+                vol_pred = torch.abs(vol_pred)
+            if torch.is_complex(vol_gt):
+                vol_gt = torch.abs(vol_gt)
             np.save(osp.join(point_cloud_path, "vol_gt.npy"), t2a(vol_gt))
             np.save(
                 osp.join(point_cloud_path, "vol_pred.npy"),

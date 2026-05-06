@@ -11,11 +11,19 @@ sys.path.append("./")
 from r2_gaussian.utils.general_utils import get_mask
 from r2_gaussian.arguments import ModelParams
 
-def fft(image):
-    return np.fft.fftshift(np.fft.fftn(np.fft.ifftshift(image), norm='ortho'))
+def fft(x):
+    return np.fft.fftshift(
+        np.fft.fftn(
+            np.fft.ifftshift(x), norm='ortho'
+        )
+    )
 
-def ifft(kspace):
-    return np.fft.fftshift(np.fft.ifftn(np.fft.ifftshift(kspace), norm='ortho'))
+def ifft(k):
+    return np.fft.fftshift(
+        np.fft.ifftn(
+            np.fft.ifftshift(k), norm='ortho'
+        )
+    )
 
 def main(args, lp: ModelParams):
     """
