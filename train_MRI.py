@@ -52,20 +52,11 @@ def training(
     gt_vol_kspace: torch.Tensor = scene.vol_gt_kspace  # device = cuda  欠采样点的kspace
     mask: torch.Tensor = scene.mask
 
-    gt_vol_image = ifft(gt_vol_kspace * mask)
-    gt_vol_kspace_1 = fft(gt_vol_image)
-    gt_vol_image_1 = ifft(gt_vol_kspace_1 * mask)
-    gt_vol_kspace_2 = fft(gt_vol_image_1)
-    gt_vol_image_2 = ifft(gt_vol_kspace_2 * mask)
-
-
     # Set up some parameters
     nii_cfg = scene.nii_cfg
     bbox = scene.bbox
     volume_to_world = max(nii_cfg["sVoxel"])
-    # opt.max_scale = None (dafult)
     max_scale = opt.max_scale * volume_to_world if opt.max_scale else None
-    # opt.densify_scale_threshold = 0.1 (percent of volume size)
     densify_scale_threshold = (
         opt.densify_scale_threshold * volume_to_world
         if opt.densify_scale_threshold
@@ -73,7 +64,6 @@ def training(
     )
     scale_bound = None
     if dataset.scale_min > 0 and dataset.scale_max > 0:
-        # default scale_min=0.0005, scale_max=0.5
         scale_bound = np.array([dataset.scale_min, dataset.scale_max]) * volume_to_world  # [0.001, 1.0]
     queryfunc = lambda x: query(
         x,
@@ -99,10 +89,6 @@ def training(
         use_tv = opt.lambda_tv > 0
     if use_tv:
         print("Use total variation loss.")
-    if opt.use_image_loss:
-        print("Use image domain loss.")
-        if opt.multi_stage_loss:
-            print("Use multi-stage loss.")
 
     # Train
     iter_start = torch.cuda.Event(enable_timing=True)
@@ -120,8 +106,10 @@ def training(
         gaussians.update_learning_rate(iteration)
 
         # query volume
-        pred_vol = queryfunc(gaussians)["vol"]  # 图像域 device:cuda
-        # fft获得kspace
+        out = queryfunc(gaussians)
+        pred_vol = out["vol"]
+        voxelspace_points = out["voxelspace_points"]
+
         if not pred_vol.is_complex():
             pred_vol_complex = torch.complex(pred_vol, torch.zeros_like(pred_vol))
         else:
@@ -131,80 +119,12 @@ def training(
         pred_vol_kspace = fft(pred_vol_complex)
 
         # # Compute loss
-        # 直接使用体积compute loss
         loss = {"total": 0.0}
 
         ## kspace data consistency 
         dc_loss = l1_loss(pred_vol_kspace[mask.bool()], gt_vol_kspace[mask.bool()])
         loss["dc_loss"] = dc_loss
         loss["total"] += loss["dc_loss"]
-
-        # image domain loss
-        # use IFFT compute pred image and gt image
-        if opt.use_image_loss:
-            pred_vol_image = ifft(pred_vol_kspace * mask)  # complex tensor
-
-            loss["image"] = l1_loss_image(pred_vol_image.unsqueeze(1), gt_vol_image.unsqueeze(1))
-            loss["total"] += loss["image"]
-
-            # edge_loss = edge_loss_fn(pred_vol_image, gt_vol_image)
-            # loss["edge_loss"] = edge_loss
-            # loss["total"] += opt.lambda_edge * loss["edge_loss"]
-
-            # 2D SSIM on each slice (first dim is depth): [B, H, W] -> [B, 1, H, W]
-            # pred_slices_2d = torch.abs(pred_vol_image).unsqueeze(1)
-            # gt_slices_2d = torch.abs(gt_vol_image).unsqueeze(1)
-            # ssim_loss = 1 - ssim(pred_slices_2d, gt_slices_2d)
-            # loss["ssim_loss"] = ssim_loss
-            # loss["total"] += opt.lambda_dssim * loss["ssim_loss"]
-
-
-            # 2026/4/41 add mutil stage fre and image loss
-            # one stage
-            if opt.multi_stage_loss:
-
-                pred_vol_kspace_1 = fft(pred_vol_image)
-                
-                # dc_loss_1 = l1_loss(pred_vol_kspace_1[mask.bool()], gt_vol_kspace_1[mask.bool()])
-                # loss["dc_loss_1"] = dc_loss_1
-                # loss["total"] += loss["dc_loss_1"]
-
-                pred_vol_image_1 = ifft(pred_vol_kspace_1 * mask)
-
-                loss["image_1"] = l1_loss_image(pred_vol_image_1.unsqueeze(1), gt_vol_image_1.unsqueeze(1))
-                loss["total"] += loss["image_1"]
-
-                # edge_loss_1 = edge_loss_fn(pred_vol_image_1, gt_vol_image_1)
-                # loss["edge_loss_1"] = edge_loss_1
-                # loss["total"] += opt.lambda_edge * loss["edge_loss_1"]
-
-                # pred_slices_2d_1 = torch.abs(pred_vol_image_1).unsqueeze(1)
-                # gt_slices_2d_1 = torch.abs(gt_vol_image_1).unsqueeze(1)
-                # ssim_loss_1 = 1 - ssim(pred_slices_2d_1, gt_slices_2d_1)
-                # loss["ssim_loss_1"] = ssim_loss_1
-                # loss["total"] += opt.lambda_dssim * loss["ssim_loss_1"]
-
-                # two stage
-                pred_vol_kspace_2 = fft(pred_vol_image_1)
-                
-                # dc_loss_2 = l1_loss(pred_vol_kspace_2[mask.bool()] , gt_vol_kspace_2[mask.bool()] )
-                # loss["dc_loss_2"] = dc_loss_2
-                # loss["total"] += loss["dc_loss_2"]
-
-                pred_vol_image_2 = ifft(pred_vol_kspace_2 * mask)
-
-                loss["image_2"] = l1_loss_image(pred_vol_image_2.unsqueeze(1), gt_vol_image_2.unsqueeze(1))
-                loss["total"] += loss["image_2"]
-
-                # edge_loss_2 = edge_loss_fn(pred_vol_image_2, gt_vol_image_2)
-                # loss["edge_loss_2"] = edge_loss_2
-                # loss["total"] += opt.lambda_edge * loss["edge_loss_2"]
-
-                # pred_slices_2d_2 = torch.abs(pred_vol_image_2).unsqueeze(1)
-                # gt_slices_2d_2 = torch.abs(gt_vol_image_2).unsqueeze(1)
-                # ssim_loss_2 = 1 - ssim(pred_slices_2d_2, gt_slices_2d_2)
-                # loss["ssim_loss_2"] = ssim_loss_2
-                # loss["total"] += opt.lambda_dssim * loss["ssim_loss_2"]
 
         # 3D TV loss
         if use_tv:
@@ -226,11 +146,11 @@ def training(
                     and iteration % opt.densification_interval == 0
                 ):
                     gaussians.densify_and_prune(
-                        opt.densify_grad_threshold,  # 决定是否致密化
-                        opt.density_min_threshold,  # Prune贡献小的高斯
+                        opt.densify_grad_threshold,
+                        opt.density_min_threshold,
                         max_scale,
                         opt.max_num_gaussians,
-                        densify_scale_threshold, # 0.2， 决定克隆还是分裂
+                        densify_scale_threshold,
                         bbox,
                         opt.use_las,
                     )

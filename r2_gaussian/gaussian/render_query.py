@@ -35,6 +35,13 @@ def query(
     """
     Query a volume with voxelization.
     """
+    voxelspace_points = (
+        torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0)
+    try:
+        voxelspace_points.retain_grad()
+    except:
+        pass
+
     voxel_settings = GaussianVoxelizationSettings(
         scale_modifier=scaling_modifier,
         nVoxel_x=int(nVoxel[0]),
@@ -52,6 +59,7 @@ def query(
     voxelizer = GaussianVoxelizer(voxel_settings=voxel_settings)
 
     means3D = pc.get_xyz
+    means3D_voxel = voxelspace_points
     use_complex_density = getattr(pipe, "use_complex_density", False)
     density = pc.get_density_components if use_complex_density else pc.get_density
 
@@ -66,6 +74,7 @@ def query(
 
     vol_pred, radii = voxelizer(
         means3D=means3D,
+        means3D_voxel=means3D_voxel,
         opacities=density,
         scales=scales,
         rotations=rotations,
@@ -81,6 +90,7 @@ def query(
     return {
         "vol": vol_pred,
         "radii": radii,
+        "voxelspace_points": voxelspace_points,
     }
 
 def render(
