@@ -34,14 +34,13 @@ def main(args, lp: ModelParams):
         accelerate_factor = lp.accelerate_factor
     dir_path = osp.join(osp.dirname(data_path),f"acc_rate{accelerate_factor}_sigma{lp.mask_sigma}")
     os.makedirs(dir_path, exist_ok=True)
-    ks_save_path = osp.join(dir_path, "kspace_gt.npy")  # 欠采样kspace 
-    vol_unsampled_save_path = osp.join(dir_path, "vol_gt_unsampled.npy")  # IFFT
+    ks_save_path = osp.join(dir_path, "kspace.npy")  # undersampled kspace 
+    vol_ifft_save_path = osp.join(dir_path, "vol_ifft.npy")  # IFFT
     vol_save_path = osp.join(dir_path, "vol_gt.npy")
-    mask_save_path = osp.join(dir_path, "mask_3D.npy")
+    mask_save_path = osp.join(dir_path, "sample_mask.npy")
     
     nii_img = nib.ni1.load(data_path)
     data = np.array(nii_img.dataobj[:,:,:], dtype=np.float32).transpose(1,0,2)
-    # data = np.array(nii_img.dataobj[0,0,:,:,:], dtype=np.float32)
     affine = nii_img.affine
 
     np.clip(data, 0, None, out=data)
@@ -53,7 +52,6 @@ def main(args, lp: ModelParams):
     offOrigin = affine[:3, 3]
     nVoxel = np.array(vol_gt.shape)
     dVoxel = nii_img.header['pixdim'][1:4]
-    # dVoxel = nii_img.header['pixdim'][3:6]
     sVoxel = nVoxel * dVoxel
     
     nii_data_path = osp.join(dir_path, "nii_data.json")
@@ -65,10 +63,9 @@ def main(args, lp: ModelParams):
             "sVoxel": sVoxel.tolist(),
         },
         "vol": "vol_gt.npy",
-        "vol_unsampled": "vol_gt_unsampled.npy",
-        "vol_kspace": "kspace_gt.npy",
-        "mask_3D": "mask_3D.npy",
-        "accelerate_factor": accelerate_factor,
+        "vol_ifft": "vol_ifft.npy",
+        "kspace": "kspace.npy",
+        "mask": "sample_mask.npy",
     }
     with open(nii_data_path,'w',encoding='utf-8') as f:
         json.dump(nii_data, f, indent=4, ensure_ascii=False)
@@ -76,11 +73,8 @@ def main(args, lp: ModelParams):
     np.save(vol_save_path, vol_gt)
     # get kspace data full
     kspace_full = fft(vol_gt)
-    kspace_full = kspace_full.astype(np.complex64) # 强制转为单精度复数，内存减半！
+    kspace_full = kspace_full.astype(np.complex64)
 
-    # kspace_full = np.fft.fftshift(
-    #     np.fft.fftn(np.fft.ifftshift(vol_gt), norm='ortho')
-    # )
     del vol_gt, data
     gc.collect()
 
@@ -95,16 +89,11 @@ def main(args, lp: ModelParams):
     gc.collect()
 
     np.save(ks_save_path, kspace_undersampled)
-    # IFFT 用于可视化和采样点
-    vol_gt_undersampled = ifft(kspace_undersampled)
-    vol_gt_undersampled_mag = np.abs(vol_gt_undersampled).astype(np.float32)
+    # IFFT 
+    vol_gt_undersampled = np.abs(ifft(kspace_undersampled))
 
-    del vol_gt_undersampled # 释放复数矩阵
-    gc.collect()
-
-    vol_gt_undersampled_mag /= np.max(vol_gt_undersampled_mag)
-    np.save(vol_unsampled_save_path, vol_gt_undersampled_mag)
-    del vol_gt_undersampled_mag
+    np.save(vol_ifft_save_path, vol_gt_undersampled)
+    del vol_gt_undersampled
     gc.collect()
 
     print(f"Data preprocessing completed. Files saved in {dir_path}.")
@@ -113,10 +102,8 @@ def main(args, lp: ModelParams):
 if __name__ == "__main__":
     parser = ArgumentParser()
     lp = ModelParams(parser)
-    parser.add_argument("--path", type=str, help="Path to MRI data", default="MRIdata/IXI002-Guys-0828-T1.nii.gz")
-    # parser.add_argument("--path", type=str, help="Path to MRI data", default="MRIdata/00000.nii.gz")
-    # parser.add_argument("--accelerate_factor", type=int, help="Accelerate factor", default=2)
-    
+    parser.add_argument("--path", type=str, help="Path to MRI data", default="MRIdata/IXI/IXI002-Guys-0828-T1.nii.gz")
+
     args = parser.parse_args()
 
     main(args, lp)

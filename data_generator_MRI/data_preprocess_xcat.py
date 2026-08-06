@@ -32,12 +32,14 @@ def main(args, lp: ModelParams):
     data_path = args.path
     if lp.accelerate_factor is not None:
         accelerate_factor = lp.accelerate_factor
+    else:
+        accelerate_factor = 8
     dir_path = osp.join(osp.dirname(data_path),f"acc_rate{accelerate_factor}_sigma{lp.mask_sigma}")
     os.makedirs(dir_path, exist_ok=True)
-    ks_save_path = osp.join(dir_path, "kspace_gt.npy")  # 欠采样kspace 
-    vol_unsampled_save_path = osp.join(dir_path, "vol_gt_unsampled.npy")  # IFFT
+    ks_save_path = osp.join(dir_path, "kspace.npy")  # undersampled kspace 
+    vol_ifft_save_path = osp.join(dir_path, "vol_ifft.npy")  # IFFT
     vol_save_path = osp.join(dir_path, "vol_gt.npy")
-    mask_save_path = osp.join(dir_path, "mask_3D.npy")
+    mask_save_path = osp.join(dir_path, "sample_mask.npy")
     
     nii_img = nib.ni1.load(data_path)
     data = np.array(nii_img.dataobj[0,0,:,:,:], dtype=np.float32)
@@ -65,9 +67,9 @@ def main(args, lp: ModelParams):
             "sVoxel": sVoxel.tolist(),
         },
         "vol": "vol_gt.npy",
-        "vol_unsampled": "vol_gt_unsampled.npy",
-        "vol_kspace": "kspace_gt.npy",
-        "mask_3D": "mask_3D.npy",
+        "vol_ifft": "vol_ifft.npy",
+        "kspace": "kspace.npy",
+        "mask": "sample_mask.npy",
     }
     with open(nii_data_path,'w',encoding='utf-8') as f:
         json.dump(nii_data, f, indent=4, ensure_ascii=False)
@@ -91,10 +93,10 @@ def main(args, lp: ModelParams):
     gc.collect()
 
     np.save(ks_save_path, kspace_undersampled)
-    # IFFT 用于可视化和采样点
-    vol_gt_undersampled = ifft(kspace_undersampled)
+    # IFFT 
+    vol_gt_undersampled = np.abs(ifft(kspace_undersampled))
 
-    np.save(vol_unsampled_save_path, vol_gt_undersampled)
+    np.save(vol_ifft_save_path, vol_gt_undersampled)
     del vol_gt_undersampled
     gc.collect()
 
@@ -104,7 +106,7 @@ def main(args, lp: ModelParams):
 if __name__ == "__main__":
     parser = ArgumentParser()
     lp = ModelParams(parser)
-    parser.add_argument("--path", type=str, help="Path to MRI data", default=r"MRIdata\00000.nii.gz")
+    parser.add_argument("--path", type=str, help="Path to MRI data", default="MRIdata/xcat/xcat00000.nii.gz")
     
     args = parser.parse_args()
 

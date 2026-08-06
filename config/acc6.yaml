@@ -1,4 +1,0 @@
-source_path: MRIdata
-use_complex_density: true
-accelerate_factor: 6
-use_image_loss: False

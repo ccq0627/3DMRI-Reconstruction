@@ -18,7 +18,7 @@ import torch
 sys.path.append("./")
 from r2_gaussian.gaussian import GaussianModel
 from r2_gaussian.arguments import ModelParams
-from r2_gaussian.dataset.dataset_readers import sceneLoadTypeCallbacks
+from r2_gaussian.dataset.dataset_readers import sceneLoadTypeCallbacks, SceneInfo_MRI
 from r2_gaussian.utils.camera_utils import cameraList_from_camInfos
 from r2_gaussian.utils.general_utils import t2a
 
@@ -37,6 +37,7 @@ class Scene:
         # self.test_cameras = {}
 
         # Read scene info
+        scene_info: SceneInfo_MRI = None
         if osp.exists(osp.join(args.source_path, "meta_data.json")):
             # Blender format
             scene_info = sceneLoadTypeCallbacks["Blender"](
@@ -56,20 +57,10 @@ class Scene:
         else:
             assert False, f"Could not recognize scene type: {args.source_path}."
 
-        # if shuffle:
-        #     random.shuffle(scene_info.train_cameras)
-        #     random.shuffle(scene_info.test_cameras)
-
-        # # Load cameras
-        # print("Loading Training Cameras")
-        # self.train_cameras = cameraList_from_camInfos(scene_info.train_cameras, args)
-        # print("Loading Test Cameras")
-        # self.test_cameras = cameraList_from_camInfos(scene_info.test_cameras, args)
-
         # Set up some parameters
         self.vol_gt = scene_info.vol  # device:GPU
-        self.vol_gt_unsampled = scene_info.vol_unsampled
-        self.vol_gt_kspace = scene_info.vol_kspace
+        self.vol_ifft = scene_info.vol_ifft
+        self.vol_kspace = scene_info.vol_kspace
         self.mask=scene_info.mask
         self.nii_cfg = scene_info.nii_cfg
         self.scene_scale = scene_info.scene_scale

@@ -10,7 +10,16 @@ from r2_gaussian.utils.graphics_utils import fetchPly
 from r2_gaussian.utils.system_utils import searchForMaxIteration
 
 
-def initialize_gaussian(gaussians: GaussianModel, args: ModelParams, loaded_iter=None):
+def initialize_gaussian(
+    gaussians: GaussianModel, 
+    args: ModelParams,
+    vol: np.ndarray,
+    nii_cfg: dict, 
+    loaded_iter=None,
+    n_points = 200_000,
+    density_thresh = 0.05,
+    density_rescale = 0.1,
+):
     if loaded_iter:
         if loaded_iter == -1:
             loaded_iter = searchForMaxIteration(
@@ -46,27 +55,42 @@ def initialize_gaussian(gaussians: GaussianModel, args: ModelParams, loaded_iter
         else:
             ply_path = args.ply_path
 
-        assert osp.exists(
-            ply_path
-        ), f"Cannot find {ply_path} for initialization. Please specify a valid ply_path or generate point cloud with initialize_pcd.py."
+        if not osp.exists(ply_path):
+            print(f"Cannot find {ply_path} for initialization. Generating a new point cloud with ifft result.")
+            density_mask = vol > density_thresh
+            valid_indices = np.argwhere(density_mask)
+            
+            sampled_indices = valid_indices[
+                np.random.choice(len(valid_indices), n_points, replace=False)
+            ]
+            offOrigin = np.array(nii_cfg["offOrigin"])
+            dVoxel = np.array(nii_cfg["dVoxel"])
+            sVoxel = np.array(nii_cfg["sVoxel"])
+    
+            sampled_positions = sampled_indices * dVoxel - sVoxel / 2 + dVoxel / 2 + offOrigin
+            sampled_densities = vol[
+                sampled_indices[:, 0],
+                sampled_indices[:, 1],
+                sampled_indices[:, 2],
+            ]
+    
+            sampled_densities = sampled_densities * density_rescale
 
-        print(f"Initialize Gaussians with {osp.basename(ply_path)} in {osp.dirname(ply_path)}.")
-        ply_type = ply_path.split(".")[-1]
-        if ply_type == "npy":
-            point_cloud = np.load(ply_path)
-            xyz = point_cloud[:, :3]
-            density = point_cloud[:, 3:4]
-        elif ply_type == ".ply":
-            point_cloud = fetchPly(ply_path)
-            xyz = np.asarray(point_cloud.points)
-            density = np.asarray(point_cloud.colors[:, :1])
+            gaussians.create_from_pcd(sampled_positions, sampled_densities, 1.0)
 
-        if False:
-            ply_path = 'data/naf_dataset/init_head_50_random.npy'
-            point_cloud = np.load(ply_path)
-            xyz = point_cloud[:, :3]
-            density = point_cloud[:, 3:4]
+        
+        else:
+            print(f"Initialize Gaussians with {osp.basename(ply_path)} in {osp.dirname(ply_path)}.")
+            ply_type = ply_path.split(".")[-1]
+            if ply_type == "npy":
+                point_cloud = np.load(ply_path)
+                xyz = point_cloud[:, :3]
+                density = point_cloud[:, 3:4]
+            elif ply_type == ".ply":
+                point_cloud = fetchPly(ply_path)
+                xyz = np.asarray(point_cloud.points)
+                density = np.asarray(point_cloud.colors[:, :1])
 
-        gaussians.create_from_pcd(xyz, density, 1.0)
+            gaussians.create_from_pcd(xyz, density, 1.0)
 
     return loaded_iter

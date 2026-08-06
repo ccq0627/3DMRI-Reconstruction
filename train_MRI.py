@@ -23,7 +23,7 @@ import torch.nn.functional as F
 sys.path.append("./")
 from r2_gaussian.arguments import ModelParams, OptimizationParams, PipelineParams
 from r2_gaussian.gaussian import GaussianModel, query, initialize_gaussian
-from r2_gaussian.utils.general_utils import safe_state, get_mask, fft, ifft
+from r2_gaussian.utils.general_utils import safe_state, get_mask, fft, ifft, t2a
 from r2_gaussian.utils.cfg_utils import load_config
 from r2_gaussian.utils.log_utils import prepare_output_and_logger, setup_experiment_folder, prepare_tqdm_write_logger
 from r2_gaussian.dataset import Scene
@@ -33,13 +33,13 @@ from r2_gaussian.utils.plot_utils import show_two_slice
 from metric_MRI import evaluate_slices, THRESHOLD
 
 
-# 原始数据： k_space (ifft)->  MRI (initialize gs)-> TV loss (query)-> 
+# process: k_space (ifft)->  MRI (initialize gs)-> TV loss (query)-> 
 # pred MRI (fft)-> pred kspace -> compute loss
 def training(
     dataset: ModelParams,
     opt: OptimizationParams,
     pipe: PipelineParams,
-    tb_writer,
+    # tb_writer,
     testing_iterations,
     saving_iterations,
     checkpoint_iterations,
@@ -49,8 +49,9 @@ def training(
 
     # Set up dataset
     scene = Scene(dataset)
-    gt_vol_kspace: torch.Tensor = scene.vol_gt_kspace  # device = cuda  欠采样点的kspace
+    gt_vol_kspace: torch.Tensor = scene.vol_kspace  # device: cuda  under sampled kspace
     mask: torch.Tensor = scene.mask
+    vol_ifft: torch.Tensor = scene.vol_ifft
 
     # Set up some parameters
     nii_cfg = scene.nii_cfg
@@ -75,7 +76,7 @@ def training(
 
     # Set up Gaussians
     gaussians = GaussianModel(scale_bound)
-    initialize_gaussian(gaussians, dataset, None)
+    initialize_gaussian(gaussians, dataset, t2a(vol_ifft), nii_cfg, None)
     scene.gaussians = gaussians
     gaussians.training_setup(opt)  # Set up optimizer and scheduler
     if checkpoint is not None:
@@ -140,7 +141,7 @@ def training(
         with torch.no_grad():
             # Adaptive control
             if iteration < opt.densify_until_iter:
-                gaussians.add_densification_stats()
+                gaussians.add_densification_stats(voxelspace_points)
                 if (
                     iteration > opt.densify_from_iter
                     and iteration % opt.densification_interval == 0
@@ -293,7 +294,7 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default=None)
-    parser.add_argument("--config", type=str, default='config/acc8woi.yaml', help="Path of config")  # debug config file
+    parser.add_argument("--config", type=str, default='config/acc8_ixi.yaml', help="Path of config")  # debug config file
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     args.test_iterations.append(args.iterations)
@@ -316,8 +317,8 @@ if __name__ == "__main__":
     log_path = osp.join(args.model_path, "log.txt")
     prepare_tqdm_write_logger(log_path)
     # Set up logging writer
-    # Set up output folder(if None) and return SummaryWriter
-    tb_writer = prepare_output_and_logger(args)
+    ## Set up output folder(if None) and return SummaryWriter
+    # tb_writer = prepare_output_and_logger(args)
 
     print("Optimizing " + args.model_path)
 
@@ -326,7 +327,7 @@ if __name__ == "__main__":
         lp.extract(args),
         op.extract(args),
         pp.extract(args),
-        tb_writer,
+        # tb_writer,
         args.test_iterations,
         args.save_iterations,
         args.checkpoint_iterations,

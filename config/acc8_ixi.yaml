@@ -1,0 +1,7 @@
+source_path: MRIdata/IXI
+model_path: MRIdata/IXI/outputs
+
+use_complex_density: true
+accelerate_factor: 8
+
+iterations: 10

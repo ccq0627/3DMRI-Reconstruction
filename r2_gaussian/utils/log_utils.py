@@ -44,8 +44,7 @@ def prepare_output_and_logger(args):
     # Create Tensorboard writer
     tb_writer = None
     # cancel tensorboard
-    # if TENSORBOARD_FOUND:
-    if False:
+    if TENSORBOARD_FOUND:
         tb_writer = SummaryWriter(args.model_path)
         tb_writer.add_text("args", args2string(args_dict), global_step=0)
     else:
@@ -53,11 +52,11 @@ def prepare_output_and_logger(args):
     return tb_writer
 
 
-def setup_experiment_folder(args: Namespace, base_dir="MRIdata/outputs"):
+def setup_experiment_folder(args: Namespace):
     time_str = datetime.now().strftime("%m-%d_%H-%M")
-    exp_name = f"exp_{time_str}_iter{args.iterations}_{args.accelerate_factor}_{'wi' if args.use_image_loss else 'woi'}_sigma{args.mask_sigma}"
+    exp_name = f"exp_{time_str}_iter{args.iterations}_{args.accelerate_factor}_sigma{args.mask_sigma}"
 
-    exp_dir = osp.join(base_dir, exp_name)
+    exp_dir = osp.join(args.model_path, exp_name)
     os.makedirs(exp_dir, exist_ok=True)
     
     config_path = osp.join(exp_dir, "exp_config.json")

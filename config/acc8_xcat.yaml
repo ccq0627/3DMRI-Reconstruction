@@ -1,0 +1,7 @@
+source_path: MRIdata/xcat
+model_path: MRIdata/xcat/outputs
+
+use_complex_density: true
+accelerate_factor: 8
+
+iterations: 10
