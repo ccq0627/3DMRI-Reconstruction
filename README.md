@@ -10,10 +10,13 @@ We recommend using [Conda](https://docs.conda.io/en/latest/miniconda.html) to se
 # Download code
 git clone https://github.com/ccq0627/3DMRI-Reconstruction.git --recursive
 
-# Install environment
-SET DISTUTILS_USE_SDK=1 # Windows only
-conda env create --file environment.yml
-conda activate r2_gaussian
+conda create -n gsmr python=3.9 -y
+conda activate gsmr
+
+pip install torch==2.1.2+cu118 torchvision==0.16.2+cu118 --extra-index-url https://download.pytorch.org/whl/cu118
+pip install -r requirements.txt
+pip install r2_gaussian/submodules/simple-knn --no-build-isolation
+pip install r2_gaussian/submodules/xray-gaussian-rasterization-voxelization --no-build-isolation
 
 ```
 
