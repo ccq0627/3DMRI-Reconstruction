@@ -24,7 +24,7 @@ def main(args, init_parser: InitParams_MRI, model_args: ModelParams):
     model_args.source_path = data_path
     scene = Scene(model_args)
     nii_cfg = scene.nii_cfg
-    vol = scene.vol_gt_unsampled.cpu().numpy()
+    vol = scene.vol_ifft.cpu().numpy()
     # vol = scene.vol_gt.cpu().numpy()
 
     save_path = args.output
@@ -80,7 +80,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     lp = ModelParams(parser)
     init_parser = InitParams_MRI(parser)
-    parser.add_argument("--data", type=str, help="Path to data.",default="MRIdata")
+    parser.add_argument("--data", type=str, help="Path to data.",default="MRIdata/xcat")
     parser.add_argument("--output", type=str, help="Output path", default=None)
     # fmt: on
 

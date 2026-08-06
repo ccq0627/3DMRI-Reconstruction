@@ -30,10 +30,7 @@ def main(args, lp: ModelParams):
     get kspace and niicfg
     """
     data_path = args.path
-    if lp.accelerate_factor is not None:
-        accelerate_factor = lp.accelerate_factor
-    else:
-        accelerate_factor = 8
+    accelerate_factor = lp.accelerate_factor
     dir_path = osp.join(osp.dirname(data_path),f"acc_rate{accelerate_factor}_sigma{lp.mask_sigma}")
     os.makedirs(dir_path, exist_ok=True)
     ks_save_path = osp.join(dir_path, "kspace.npy")  # undersampled kspace 
