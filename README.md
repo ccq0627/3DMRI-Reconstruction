@@ -24,17 +24,20 @@ pip install r2_gaussian/submodules/xray-gaussian-rasterization-voxelization --no
 
 ```sh
 └── MRIdata
-    └── XXX.nii.gz
+    └── xcat
+        └── XXX.nii.gz
+    └── XXX
+        └── XXX.nii.gz
 ```
 
 ## 3. Running
 
 ### 3.1 Initialization
-you need to use `data_preprocess.py` to preprocess original data.Then, you need to use `initialize_pcd_MRI.py` to generate a `*.npy` file which stores the point cloud for Gaussian initialization.
+you need to use `data_preprocess.py` to preprocess original data.Then, you need to use `initialize_pcd_MRI.py` to generate a `*.npy` file which stores the point cloud for Gaussian initialization(Optional).
 
 ### 3.2 Training
 
-Use `train_MRI.py` to train Gaussians. Make sure that the initialization file `*.npy` has been generated.
+Use `train_MRI.py` to train Gaussians.
 
 ```sh
 # Training
@@ -43,6 +46,6 @@ python train_MRI.py
 
 ## 4. Acknowledgement, license and citation
 
-Our code is adapted from [Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting), [SAX-NeRF](https://github.com/caiyuanhao1998/SAX-NeRF), [NAF](https://github.com/Ruyi-Zha/naf_cbct), [TIGRE toolbox](https://github.com/CERN/TIGRE.git) and [R2-Gausssian](https://github.com/Ruyi-Zha/r2_gaussian). We thank the authors for their excellent works.
+Our code is adapted from [Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting) and [R2-Gausssian](https://github.com/Ruyi-Zha/r2_gaussian). We thank the authors for their excellent works.
 
 This project is under the license of [Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting).
