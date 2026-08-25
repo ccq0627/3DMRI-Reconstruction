@@ -99,7 +99,7 @@ VoxelizeGaussiansCUDA(
 
 
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 VoxelizeGaussiansBackwardCUDA(
 	const torch::Tensor& means3D,
 	const torch::Tensor& radii_x,
@@ -129,6 +129,7 @@ VoxelizeGaussiansBackwardCUDA(
 
 	torch::Tensor dL_dmeans3D = torch::zeros({P, 3}, means3D.options());
 	torch::Tensor dL_dmeans3D_norm = torch::zeros({P, 3}, means3D.options());
+	torch::Tensor dL_dmeans3D_norm_abs = torch::zeros({P, 3}, means3D.options());
 	torch::Tensor dL_dconic3D = torch::zeros({P, 6}, means3D.options());
 	torch::Tensor dL_dopacity = torch::zeros({P, NUM_CHANNELS}, means3D.options());
 	torch::Tensor dL_dcov3D = torch::zeros({P, 6}, means3D.options());
@@ -154,6 +155,7 @@ VoxelizeGaussiansBackwardCUDA(
 		reinterpret_cast<char*>(imageBuffer.contiguous().data_ptr()),
 		dL_dout_color.contiguous().data<float>(),
 		dL_dmeans3D_norm.contiguous().data<float>(),  
+		dL_dmeans3D_norm_abs.contiguous().data<float>(),
 		dL_dconic3D.contiguous().data<float>(),  
 		dL_dopacity.contiguous().data<float>(),
 		dL_dmeans3D.contiguous().data<float>(),
@@ -163,5 +165,5 @@ VoxelizeGaussiansBackwardCUDA(
 		debug);
 	}
 
-	return std::make_tuple(dL_dopacity, dL_dmeans3D, dL_dcov3D, dL_dscales, dL_drotations);
+	return std::make_tuple(dL_dmeans3D_norm_abs, dL_dopacity, dL_dmeans3D, dL_dcov3D, dL_dscales, dL_drotations);
 }

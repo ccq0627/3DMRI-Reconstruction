@@ -11,7 +11,7 @@
 import sys
 import torch
 import math
-from xray_gaussian_rasterization_voxelization import (
+from xray_gaussian_rasterization_voxelizationV2 import (
     GaussianRasterizationSettings,
     GaussianRasterizer,
     GaussianVoxelizationSettings,
@@ -35,12 +35,11 @@ def query(
     """
     Query a volume with voxelization.
     """
-    voxelspace_points = (
-        torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0)
-    try:
-        voxelspace_points.retain_grad()
-    except:
-        pass
+    # This detached proxy receives the voxelizer's homodirectional
+    # (absolute per-voxel contribution) position gradient.  It must not
+    # alias pc.get_xyz, otherwise the absolute statistic would alter the
+    # optimization gradient for Gaussian positions.
+    voxelspace_points = torch.zeros_like(pc.get_xyz, requires_grad=True)
 
     voxel_settings = GaussianVoxelizationSettings(
         scale_modifier=scaling_modifier,
@@ -59,7 +58,7 @@ def query(
     voxelizer = GaussianVoxelizer(voxel_settings=voxel_settings)
 
     means3D = pc.get_xyz
-    means3D_voxel = voxelspace_points
+    means3D_abs = voxelspace_points
     use_complex_density = getattr(pipe, "use_complex_density", False)
     density = pc.get_density_components if use_complex_density else pc.get_density
 
@@ -74,7 +73,7 @@ def query(
 
     vol_pred, radii = voxelizer(
         means3D=means3D,
-        means3D_voxel=means3D_voxel,
+        means3D_abs=means3D_abs,
         opacities=density,
         scales=scales,
         rotations=rotations,

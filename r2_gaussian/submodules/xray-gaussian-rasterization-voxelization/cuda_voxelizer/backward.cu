@@ -226,6 +226,7 @@ renderCUDA(
 	const uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ dL_dpixels,
 	float3* __restrict__ dL_dmean3D_norm,
+	float3* __restrict__ dL_dmean3D_norm_abs,
 	float* __restrict__ dL_dconic3D,
 	float* __restrict__ dL_dopacity)
 {
@@ -364,6 +365,10 @@ renderCUDA(
 			atomicAdd(&dL_dmean3D_norm[global_id].y, dL_dG * dG_ddely * ddely_dy); // ddelx_dx is used to compensate ndc2pix
 			atomicAdd(&dL_dmean3D_norm[global_id].z, dL_dG * dG_ddelz * ddelz_dz); // ddelx_dx is used to compensate ndc2pix
 
+			atomicAdd(&dL_dmean3D_norm_abs[global_id].x, fabsf(dL_dG * dG_ddelx * ddelx_dx));
+			atomicAdd(&dL_dmean3D_norm_abs[global_id].y, fabsf(dL_dG * dG_ddely * ddely_dy));
+			atomicAdd(&dL_dmean3D_norm_abs[global_id].z, fabsf(dL_dG * dG_ddelz * ddelz_dz));
+
 			atomicAdd(&dL_dconic3D[global_id * 6 + 0], - 0.5 * gdx * d.x * dL_dG);  // conic_a
 			atomicAdd(&dL_dconic3D[global_id * 6 + 1], - 1.0 * gdx * d.y * dL_dG);  // conic_b
 			atomicAdd(&dL_dconic3D[global_id * 6 + 2], - 1.0 * gdx * d.z * dL_dG);  // conic_c
@@ -436,6 +441,7 @@ void BACKWARD::render(
 	const uint32_t* n_contrib,
 	const float* dL_dpixels,
 	float3* dL_dmean3D_norm,
+	float3* dL_dmean3D_norm_abs,
 	float* dL_dconic3D,
 	float* dL_dopacity
 	)
@@ -450,6 +456,7 @@ void BACKWARD::render(
 		n_contrib,
 		dL_dpixels,
 		dL_dmean3D_norm,
+		dL_dmean3D_norm_abs,
 		dL_dconic3D,
 		dL_dopacity
 		);

@@ -35,7 +35,7 @@ VoxelizeGaussiansCUDA(
 	const bool prefiltered,
 	const bool debug);
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 VoxelizeGaussiansBackwardCUDA(
 	const torch::Tensor& means3D,
 	const torch::Tensor& radii_x,

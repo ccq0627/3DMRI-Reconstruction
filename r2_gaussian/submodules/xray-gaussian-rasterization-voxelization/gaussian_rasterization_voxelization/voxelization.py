@@ -52,6 +52,7 @@ class GaussianVoxelizationSettings(NamedTuple):
 
 def voxelize_gaussians(
     means3D,
+    means3D_abs,
     opacities,
     scales,
     rotations,
@@ -61,6 +62,7 @@ def voxelize_gaussians(
     opacities = _ensure_opacity_channels(opacities)
     return _VoxelizeGaussians.apply(
         means3D,
+        means3D_abs,
         opacities,
         scales,
         rotations,
@@ -74,6 +76,7 @@ class _VoxelizeGaussians(torch.autograd.Function):
     def forward(
         ctx,
         means3D,
+        means3D_abs,
         opacities,
         scales,
         rotations,
@@ -199,13 +202,17 @@ class _VoxelizeGaussians(torch.autograd.Function):
             voxel_settings.debug,
         )
 
-        # Compute gradients for relevant tensors by invoking backward method
+        # The voxelizer returns an additional gradient whose components are
+        # accumulated as absolute per-voxel contributions.  It is routed to
+        # means3D_abs only and is never applied to the optimizable positions.
+        # Compute gradients for relevant tensors by invoking backward method.
         if voxel_settings.debug:
             cpu_args = cpu_deep_copy_tuple(
                 args
             )  # Copy them before they can be corrupted
             try:
                 (
+                    grad_means3D_abs,
                     grad_opacities,
                     grad_means3D,
                     grad_cov3Ds_precomp,
@@ -220,6 +227,7 @@ class _VoxelizeGaussians(torch.autograd.Function):
                 raise ex
         else:
             (
+                grad_means3D_abs,
                 grad_opacities,
                 grad_means3D,
                 grad_cov3Ds_precomp,
@@ -228,6 +236,7 @@ class _VoxelizeGaussians(torch.autograd.Function):
             ) = _C.voxelize_gaussians_backward(*args)
         grads = (
             grad_means3D,
+            grad_means3D_abs,
             grad_opacities,
             grad_scales,
             grad_rotations,
@@ -246,6 +255,7 @@ class GaussianVoxelizer(nn.Module):
     def forward(
         self,
         means3D,
+        means3D_abs,
         opacities,
         scales=None,
         rotations=None,
@@ -271,6 +281,7 @@ class GaussianVoxelizer(nn.Module):
         # Invoke C++/CUDA rasterization routine
         return voxelize_gaussians(
             means3D,
+            means3D_abs,
             opacities,
             scales,
             rotations,

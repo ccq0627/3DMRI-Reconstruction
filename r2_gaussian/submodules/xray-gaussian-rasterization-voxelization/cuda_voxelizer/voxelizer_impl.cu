@@ -322,6 +322,7 @@ void CudaVoxelizer::Voxelizer::backward(
 	char* img_buffer,
 	const float* dL_dpix,
 	float* dL_dmean3D_norm,
+	float* dL_dmean3D_norm_abs,
 	float* dL_dconic3D,
 	float* dL_dopacity,
 	float* dL_dmean3D,
@@ -364,6 +365,7 @@ void CudaVoxelizer::Voxelizer::backward(
 		imgState.n_contrib,
 		dL_dpix,
 		(float3*)dL_dmean3D_norm,
+		(float3*)dL_dmean3D_norm_abs,
 		dL_dconic3D,
 		dL_dopacity), debug)
 

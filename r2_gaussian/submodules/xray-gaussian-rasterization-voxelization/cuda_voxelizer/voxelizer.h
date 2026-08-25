@@ -62,6 +62,7 @@ namespace CudaVoxelizer
 			char* img_buffer,
 			const float* dL_dpix,
 			float* dL_dmean3D_norm,
+			float* dL_dmean3D_norm_abs,
 			float* dL_dconic3D,
 			float* dL_dopacity,
 			float* dL_dmean3D,

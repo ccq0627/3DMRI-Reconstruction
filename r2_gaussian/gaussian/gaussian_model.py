@@ -601,6 +601,7 @@ class GaussianModel:
     def densify_and_prune(
         self,
         max_grad,
+        max_grad_abs,
         min_density,
         max_scale,
         max_num_gaussians,
@@ -608,10 +609,22 @@ class GaussianModel:
         bbox=None,
         use_las = False,
     ):
-        grads = self.xyz_gradient_accum
-        grads_abs = self.xyz_gradient_accum_abs
-        grads[grads.isnan()] = 0.0
-        grads_abs[grads_abs.isnan()] = 0.0
+        # Average over the iterations that contributed to the statistics.
+        # `grads_abs` is the Abs-GS homodirectional voxel-space gradient:
+        # each coordinate contribution is made positive before accumulation
+        # in the voxelizer, so opposing voxel gradients cannot cancel out.
+        grads = torch.nan_to_num(
+            self.xyz_gradient_accum,
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0,
+        )
+        grads_abs = torch.nan_to_num(
+            self.xyz_gradient_accum_abs,
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0,
+        )
 
         # Densify Gaussians if Gaussians are fewer than threshold
         if densify_scale_threshold:
@@ -619,12 +632,21 @@ class GaussianModel:
                 max_num_gaussians and self.get_xyz.shape[0] < max_num_gaussians
             ):
                 if use_las:
-                    selected_pts_num = torch.where(torch.norm(grads, dim=-1) >= max_grad, True, False).sum()
+                    selected_pts_num = torch.where(
+                        torch.norm(grads, dim=-1) >= max_grad,
+                        True,
+                        False,
+                    ).sum()
                     if selected_pts_num > 0:
+                        tqdm.write(f"[INFO] selected_pts_num: {selected_pts_num}")
                         self.long_axis_split(grads, max_grad, 0.45, 0.6)
                 else:
                     self.densify_and_clone(grads, max_grad, densify_scale_threshold)
-                    self.densify_and_split(grads, max_grad, densify_scale_threshold)
+                    self.densify_and_split(
+                        grads_abs,
+                        max_grad_abs,
+                        densify_scale_threshold,
+                    )
 
         # Prune gaussians with too small density
         prune_mask = (self.get_density < min_density).squeeze()
@@ -653,8 +675,18 @@ class GaussianModel:
         return grads
 
     def add_densification_stats(self, voxelspace_points: torch.Tensor):
-        self.xyz_gradient_accum += torch.norm(self._xyz.grad, dim=-1, keepdim=True)  # [n, 1]
-        self.xyz_gradient_accum_abs += torch.norm(voxelspace_points.grad, dim=-1, keepdim=True)  # [n, 1]
+        if self._xyz.grad is None or voxelspace_points.grad is None:
+            raise RuntimeError(
+                "Voxelizer did not provide position gradients for densification. "
+                "Rebuild xray_gaussian_rasterization_voxelization after enabling Abs-GS."
+            )
+
+        self.xyz_gradient_accum += torch.norm(
+            self._xyz.grad, dim=-1, keepdim=True
+        )
+        self.xyz_gradient_accum_abs += torch.norm(
+            voxelspace_points.grad, dim=-1, keepdim=True
+        )
         self.denom += 1
 
     def _ensure_density_param(self, density: torch.Tensor) -> nn.Parameter:

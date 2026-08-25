@@ -27,7 +27,7 @@ from r2_gaussian.utils.general_utils import safe_state, get_mask, fft, ifft, t2a
 from r2_gaussian.utils.cfg_utils import load_config
 from r2_gaussian.utils.log_utils import prepare_output_and_logger, setup_experiment_folder, prepare_tqdm_write_logger
 from r2_gaussian.dataset import Scene
-from r2_gaussian.utils.loss_utils import l1_loss, L2_loss, ssim, tv_3d_loss, edge_loss_fn, l1_loss_image, l2_loss_image
+from r2_gaussian.utils.loss_utils import l1_loss, L2_loss, ssim, tv_3d_loss
 from r2_gaussian.utils.image_utils import metric_vol, metric_proj
 from r2_gaussian.utils.plot_utils import show_two_slice
 from metric_MRI import evaluate_slices, THRESHOLD
@@ -148,6 +148,7 @@ def training(
                 ):
                     gaussians.densify_and_prune(
                         opt.densify_grad_threshold,
+                        opt.densify_grad_abs_threshold,
                         opt.density_min_threshold,
                         max_scale,
                         opt.max_num_gaussians,
